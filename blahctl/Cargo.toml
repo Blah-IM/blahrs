@@ -1,0 +1,16 @@
+[package]
+name = "blahctl"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1.0.86"
+bitflags = "2.6.0"
+blah.path = ".."
+clap = { version = "4.5.16", features = ["derive"] }
+ed25519-dalek = { version = "2.1.1", features = ["pkcs8", "pem", "rand_core"] }
+rand = "0.8.5"
+reqwest = { version = "0.12.7", features = ["json"] }
+rusqlite = "0.32.1"
+tokio = { version = "1.39.3", features = ["rt", "macros"] }
+uuid = "1.10.0"

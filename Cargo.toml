@@ -3,4 +3,27 @@ name = "blah"
 version = "0.0.0"
 edition = "2021"
 
+# TODO: Shrink dependencies.
 [dependencies]
+anyhow = "1.0.86"
+axum = { version = "0.7.5", features = ["tokio"] }
+bitflags = { version = "2.6.0", features = ["serde"] }
+clap = { version = "4.5.16", features = ["derive"] }
+ed25519-dalek = { version = "2.1.1", features = ["digest", "serde"] }
+hex = { version = "0.4.3", features = ["serde"] }
+humantime = "2.1.0"
+rand_core = "0.6.4"
+rusqlite = { version = "0.32.1", features = ["uuid"] }
+sd-notify = "0.4.2"
+serde = { version = "1.0.209", features = ["derive"] }
+serde-aux = "4.5.0"
+serde-constant = "0.1.0"
+serde_json = "1.0.127"
+tokio = { version = "1.39.3", features = ["macros", "rt-multi-thread", "sync"] }
+tokio-stream = { version = "0.1.15", features = ["sync"] }
+tracing = "0.1.40"
+tracing-subscriber = "0.3.18"
+uuid = { version = "1.10.0", features = ["serde", "v4"] }
+
+[workspace]
+members = [ "./blahctl" ]
