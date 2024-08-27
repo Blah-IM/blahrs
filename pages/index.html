@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <title>poc</title>
+    <script src="./main.js" defer></script>
+    <style>
+      body {
+        display: flex;
+        flex-direction: column;
+        height: 100vh;
+        margin: 0;
+        font-family: monospace;
+      }
+      #msg-flow {
+        flex: 1;
+        overflow: scroll;
+      }
+      #msg-flow > * {
+        display: block;
+      }
+      .log {
+        margin: auto;
+        font-style: italic;
+      }
+      .log::before {
+        content: "«";
+      }
+      .log::after {
+        content: "»";
+      }
+
+      #input-area > * {
+        display: flex;
+        flex-direction: row;
+      }
+      #input-area > * > label {
+        margin: auto;
+      }
+      #input-area > * > input {
+        flex: 1;
+      }
+    </style>
+  </head>
+
+  <body>
+    <div id="msg-flow">
+      <span class="log">please enter room url below and press ENTER</span>
+    </div>
+    <div id="input-area">
+      <div>
+        <label for="user-pubkey">user pubkey:</label>
+        <input type="text" id="user-pubkey" placeholder="-" readonly />
+        <button id="regen-key">regenerate</button>
+      </div>
+
+      <div>
+        <label for="room-url">room url:</label>
+        <input
+            type="url"
+            id="room-url"
+            placeholder="https://example.com"
+            pattern="https://.*"
+            required
+            />
+      </div>
+      <div>
+        <label for="chat">chat:</label>
+        <input type="text" id="chat" placeholder="message" />
+      </div>
+    </div>
+  </body>
+</html>
