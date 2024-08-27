@@ -12,7 +12,7 @@ use axum::response::{sse, IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{async_trait, Json, Router};
 use blah::types::{
-    ChatItem, ChatPayload, CreateRoomPayload, RoomPermission, ServerPermission, UserKey, WithSig,
+    ChatItem, ChatPayload, CreateRoomPayload, RoomPermission, ServerPermission, Signee, WithSig,
 };
 use ed25519_dalek::SIGNATURE_LENGTH;
 use rusqlite::{named_params, params, OptionalExtension};
@@ -92,7 +92,7 @@ async fn main_async(opt: Cli, st: AppState) -> Result<()> {
         // NB. Sync with `feed_url` and `next_url` generation.
         .route("/room/:ruuid/feed.json", get(room_get_feed))
         .route("/room/:ruuid/event", get(room_event))
-        .route("/room/:ruuid/item", post(room_post_item))
+        .route("/room/:ruuid/item", get(room_get_item).post(room_post_item))
         .with_state(Arc::new(st))
         .layer(tower_http::cors::CorsLayer::permissive());
 
@@ -182,7 +182,7 @@ async fn room_create(
 
 // NB. `next_url` generation depends on this structure.
 #[derive(Debug, Deserialize)]
-struct GetRoomParams {
+struct GetRoomItemParams {
     #[serde(
         default,
         deserialize_with = "serde_aux::field_attributes::deserialize_number_from_string"
@@ -190,16 +190,64 @@ struct GetRoomParams {
     before_id: u64,
 }
 
+async fn room_get_item(
+    st: ArcState,
+    Path(ruuid): Path<Uuid>,
+    params: Query<GetRoomItemParams>,
+) -> Result<impl IntoResponse, StatusCode> {
+    let (room_meta, items) =
+        query_room_items(&st.conn.lock().unwrap(), ruuid, &params).map_err(from_db_error)?;
+
+    // TODO: This format is to-be-decided. Or do we even need this interface other than
+    // `feed.json`?
+    Ok(Json((room_meta, items)))
+}
+
 async fn room_get_feed(
     st: ArcState,
     Path(ruuid): Path<Uuid>,
-    params: Query<GetRoomParams>,
+    params: Query<GetRoomItemParams>,
 ) -> Result<impl IntoResponse, StatusCode> {
-    let room_feed = query_feed(&st.conn.lock().unwrap(), &st.base_url, ruuid, &params)
-        .map_err(from_db_error)?;
+    let (room_meta, items) =
+        query_room_items(&st.conn.lock().unwrap(), ruuid, &params).map_err(from_db_error)?;
+
+    let items = items
+        .into_iter()
+        .map(|(cid, item)| {
+            let time = SystemTime::UNIX_EPOCH + Duration::from_secs(item.signee.timestamp);
+            let author = FeedAuthor {
+                name: item.signee.user.to_string(),
+            };
+            FeedItem {
+                id: cid.to_string(),
+                content_text: item.signee.payload.text,
+                date_published: humantime::format_rfc3339(time).to_string(),
+                authors: (author,),
+                extra: FeedItemExtra {
+                    timestamp: item.signee.timestamp,
+                    nonce: item.signee.nonce,
+                    sig: item.sig,
+                },
+            }
+        })
+        .collect::<Vec<_>>();
+
+    let base_url = &st.base_url;
+    let feed_url = format!("{base_url}/room/{ruuid}/feed.json");
+    let next_url = (items.len() == PAGE_LEN).then(|| {
+        let last_id = &items.last().expect("page size is not 0").id;
+        format!("{feed_url}?before_id={last_id}")
+    });
+    let feed = FeedRoom {
+        title: room_meta.title,
+        items,
+        next_url,
+        feed_url,
+    };
+
     Ok((
         [(header::CONTENT_TYPE, "application/feed+json")],
-        Json(room_feed),
+        Json(feed),
     ))
 }
 
@@ -237,12 +285,16 @@ struct FeedItemExtra {
     sig: [u8; SIGNATURE_LENGTH],
 }
 
-fn query_feed(
+#[derive(Debug, Serialize, Deserialize)]
+pub struct RoomMetadata {
+    pub title: String,
+}
+
+fn query_room_items(
     conn: &rusqlite::Connection,
-    base_url: &str,
     ruuid: Uuid,
-    params: &GetRoomParams,
-) -> rusqlite::Result<FeedRoom> {
+    params: &GetRoomItemParams,
+) -> rusqlite::Result<(RoomMetadata, Vec<(u64, ChatItem)>)> {
     let (rid, title) = conn.query_row(
         r"
         SELECT `rid`, `title`
@@ -256,6 +308,7 @@ fn query_feed(
             Ok((rid, title))
         },
     )?;
+    let room_meta = RoomMetadata { title };
 
     let mut stmt = conn.prepare(
         r"
@@ -276,38 +329,25 @@ fn query_feed(
                 ":limit": PAGE_LEN,
             },
             |row| {
-                let timestamp = row.get::<_, u64>("timestamp")?;
-                let time = SystemTime::UNIX_EPOCH + Duration::from_secs(timestamp);
-                let author = FeedAuthor {
-                    name: row.get::<_, UserKey>("userkey")?.to_string(),
-                };
-                Ok(FeedItem {
-                    id: row.get::<_, u64>("cid")?.to_string(),
-                    content_text: row.get("message")?,
-                    date_published: humantime::format_rfc3339(time).to_string(),
-                    authors: (author,),
-                    extra: FeedItemExtra {
-                        timestamp,
+                let cid = row.get::<_, u64>("cid")?;
+                let item = ChatItem {
+                    sig: row.get("sig")?,
+                    signee: Signee {
                         nonce: row.get("nonce")?,
-                        sig: row.get("sig")?,
+                        timestamp: row.get("timestamp")?,
+                        user: row.get("userkey")?,
+                        payload: ChatPayload {
+                            room: ruuid,
+                            text: row.get("message")?,
+                        },
                     },
-                })
+                };
+                Ok((cid, item))
             },
         )?
         .collect::<rusqlite::Result<Vec<_>>>()?;
 
-    let feed_url = format!("{base_url}/room/{ruuid}/feed.json");
-    let next_url = (items.len() == PAGE_LEN).then(|| {
-        let last_id = &items.last().expect("page size is not 0").id;
-        format!("{feed_url}?before_id={last_id}")
-    });
-
-    Ok(FeedRoom {
-        title,
-        items,
-        next_url,
-        feed_url,
-    })
+    Ok((room_meta, items))
 }
 
 /// Extractor for verified JSON payload.
@@ -360,7 +400,7 @@ async fn room_post_item(
             .optional()
             .map_err(from_db_error)?
         else {
-            tracing::debug!("rejected post: unpermitted user {:?}", chat.signee.user);
+            tracing::debug!("rejected post: unpermitted user {}", chat.signee.user);
             return Err(StatusCode::UNAUTHORIZED);
         };
 
