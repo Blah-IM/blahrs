@@ -7,7 +7,7 @@ use bitflags::Flags;
 use blah::types::{ChatPayload, CreateRoomPayload, ServerPermission, UserKey, WithSig};
 use ed25519_dalek::pkcs8::spki::der::pem::LineEnding;
 use ed25519_dalek::pkcs8::{DecodePrivateKey, DecodePublicKey, EncodePrivateKey, EncodePublicKey};
-use ed25519_dalek::{SigningKey, VerifyingKey};
+use ed25519_dalek::{SigningKey, VerifyingKey, PUBLIC_KEY_LENGTH};
 use rand::rngs::OsRng;
 use reqwest::Url;
 use rusqlite::{named_params, Connection};
@@ -65,7 +65,7 @@ enum DbCommand {
 
 fn flag_parser<T: Flags>(s: &str) -> clap::error::Result<T> {
     bitflags::parser::from_str_strict(s)
-        .map_err(|_| clap::error::Error::new(clap::error::ErrorKind::InvalidValue))
+        .map_err(|_| clap::Error::new(clap::error::ErrorKind::InvalidValue))
 }
 
 #[derive(Debug, clap::Subcommand)]
@@ -95,18 +95,33 @@ enum ApiCommand {
 #[derive(Debug, clap::Args)]
 #[clap(group = clap::ArgGroup::new("user").required(true).multiple(false))]
 struct User {
-    /// The path to a user public key.
+    /// Hex-encoded public key.
+    #[arg(long, group = "user", value_parser = userkey_parser)]
+    key: Option<VerifyingKey>,
+
+    /// Path to a user public key.
     #[arg(long, short = 'f', group = "user")]
     public_key_file: Option<PathBuf>,
 
-    /// The user domain where `/.well-known/blah/key` is hosted.
+    /// User's URL where `/.well-known/blah/key` is hosted.
     #[arg(long, group = "user")]
     url: Option<Url>,
 }
 
+fn userkey_parser(s: &str) -> clap::error::Result<VerifyingKey> {
+    (|| {
+        let mut buf = [0u8; PUBLIC_KEY_LENGTH];
+        hex::decode_to_slice(s, &mut buf).ok()?;
+        VerifyingKey::from_bytes(&buf).ok()
+    })()
+    .ok_or_else(|| clap::Error::new(clap::error::ErrorKind::InvalidValue))
+}
+
 impl User {
     async fn fetch_key(&self) -> Result<UserKey> {
-        let rawkey = if let Some(path) = &self.public_key_file {
+        let rawkey = if let Some(key) = &self.key {
+            return Ok(UserKey(key.to_bytes()));
+        } else if let Some(path) = &self.public_key_file {
             fs::read_to_string(path).context("failed to read key file")?
         } else if let Some(url) = &self.url {
             let url = url.join(KEY_URL_SUBPATH)?;
