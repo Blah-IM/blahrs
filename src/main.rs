@@ -93,7 +93,8 @@ async fn main_async(opt: Cli, st: AppState) -> Result<()> {
         .route("/room/:ruuid/feed.json", get(room_get_feed))
         .route("/room/:ruuid/event", get(room_event))
         .route("/room/:ruuid/item", post(room_post_item))
-        .with_state(Arc::new(st));
+        .with_state(Arc::new(st))
+        .layer(tower_http::cors::CorsLayer::permissive());
 
     let listener = tokio::net::TcpListener::bind(&opt.listen)
         .await
@@ -433,5 +434,8 @@ async fn room_event(
             .expect("serialization cannot fail");
         Some(Ok::<_, Infallible>(evt))
     });
+    // NB. Send an empty event immediately to trigger client ready event.
+    let first_event = sse::Event::default().comment("");
+    let stream = futures_util::stream::iter(Some(Ok(first_event))).chain(stream);
     Ok(sse::Sse::new(stream).keep_alive(sse::KeepAlive::default()))
 }
