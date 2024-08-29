@@ -17,7 +17,7 @@ use uuid::Uuid;
 
 const TIMESTAMP_TOLERENCE: u64 = 90;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct UserKey(#[serde(with = "hex::serde")] pub [u8; PUBLIC_KEY_LENGTH]);
 
@@ -93,7 +93,44 @@ pub type ChatItem = WithSig<ChatPayload>;
 #[serde(tag = "typ", rename = "create_room")]
 pub struct CreateRoomPayload {
     pub attrs: RoomAttrs,
+    /// The initial member list. Besides invariants of `RoomMemberList`, this also must include the
+    /// room creator themselves, with the highest permission (-1).
+    pub members: RoomMemberList,
     pub title: String,
+}
+
+/// A collection of room members, with these invariants:
+/// 1. Sorted by userkeys.
+/// 2. No duplicated users.
+#[derive(Debug, Deserialize)]
+#[serde(try_from = "Vec<RoomMember>")]
+pub struct RoomMemberList(pub Vec<RoomMember>);
+
+impl Serialize for RoomMemberList {
+    fn serialize<S>(&self, ser: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        self.0.serialize(ser)
+    }
+}
+
+impl TryFrom<Vec<RoomMember>> for RoomMemberList {
+    type Error = &'static str;
+
+    fn try_from(members: Vec<RoomMember>) -> Result<Self, Self::Error> {
+        if members.windows(2).all(|w| w[0].user.0 < w[1].user.0) {
+            Ok(Self(members))
+        } else {
+            Err("unsorted or duplicated users")
+        }
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct RoomMember {
+    pub permission: MemberPermission,
+    pub user: UserKey,
 }
 
 /// Proof of room membership for read-access.
@@ -107,7 +144,7 @@ pub struct AuthPayload {}
 #[serde(deny_unknown_fields, tag = "typ", rename_all = "snake_case")]
 pub enum RoomAdminPayload {
     AddMember {
-        permission: RoomPermission,
+        permission: MemberPermission,
         room: Uuid,
         user: UserKey,
     },
@@ -123,7 +160,7 @@ bitflags! {
     }
 
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-    pub struct RoomPermission: u64 {
+    pub struct MemberPermission: u64 {
         const POST_CHAT = 1 << 0;
         const ADD_MEMBER = 1 << 1;
 
@@ -139,7 +176,7 @@ bitflags! {
 }
 
 impl_serde_for_bitflags!(ServerPermission);
-impl_serde_for_bitflags!(RoomPermission);
+impl_serde_for_bitflags!(MemberPermission);
 impl_serde_for_bitflags!(RoomAttrs);
 
 mod sql_impl {
@@ -184,7 +221,7 @@ mod sql_impl {
         };
     }
 
-    impl_u64_flag!(ServerPermission, RoomPermission, RoomAttrs);
+    impl_u64_flag!(ServerPermission, MemberPermission, RoomAttrs);
 }
 
 #[cfg(test)]

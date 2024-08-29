@@ -4,7 +4,10 @@ use std::{fs, io};
 
 use anyhow::{Context, Result};
 use bitflags::Flags;
-use blah::types::{ChatPayload, CreateRoomPayload, RoomAttrs, ServerPermission, UserKey, WithSig};
+use blah::types::{
+    ChatPayload, CreateRoomPayload, MemberPermission, RoomAttrs, RoomMember, RoomMemberList,
+    ServerPermission, UserKey, WithSig,
+};
 use ed25519_dalek::pkcs8::spki::der::pem::LineEnding;
 use ed25519_dalek::pkcs8::{DecodePrivateKey, DecodePublicKey, EncodePrivateKey, EncodePublicKey};
 use ed25519_dalek::{SigningKey, VerifyingKey, PUBLIC_KEY_LENGTH};
@@ -208,8 +211,14 @@ async fn main_api(api_url: Url, command: ApiCommand) -> Result<()> {
         } => {
             let key = load_signing_key(&private_key_file)?;
             let payload = CreateRoomPayload {
-                title,
                 attrs: attrs.unwrap_or_default(),
+                title,
+                // The CLI does not support passing multiple members because `User` itself is a
+                // disjoint arg-group.
+                members: RoomMemberList(vec![RoomMember {
+                    permission: MemberPermission::ALL,
+                    user: UserKey(key.verifying_key().to_bytes()),
+                }]),
             };
             let payload = WithSig::sign(&key, &mut OsRng, payload)?;
 

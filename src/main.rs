@@ -12,7 +12,7 @@ use axum::response::{sse, IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{async_trait, Json, Router};
 use blah::types::{
-    AuthPayload, ChatItem, ChatPayload, CreateRoomPayload, RoomAttrs, RoomPermission,
+    AuthPayload, ChatItem, ChatPayload, CreateRoomPayload, MemberPermission, RoomAttrs,
     ServerPermission, Signee, UserKey, WithSig,
 };
 use ed25519_dalek::SIGNATURE_LENGTH;
@@ -128,24 +128,30 @@ async fn room_create(
     st: ArcState,
     SignedJson(params): SignedJson<CreateRoomPayload>,
 ) -> Result<Json<Uuid>, StatusCode> {
+    let members = &params.signee.payload.members.0;
+    if !members
+        .iter()
+        .any(|m| m.user == params.signee.user && m.permission == MemberPermission::ALL)
+    {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+
     let mut conn = st.conn.lock().unwrap();
-    let Some((uid, _perm)) = conn
+    let Some(true) = conn
         .query_row(
             r"
-            SELECT `uid`, `permission`
+            SELECT `permission`
             FROM `user`
             WHERE `userkey` = ?
             ",
             params![params.signee.user],
             |row| {
-                let uid = row.get::<_, u64>("uid")?;
                 let perm = row.get::<_, ServerPermission>("permission")?;
-                Ok((uid, perm))
+                Ok(perm.contains(ServerPermission::CREATE_ROOM))
             },
         )
         .optional()
         .map_err(from_db_error)?
-        .filter(|(_, perm)| perm.contains(ServerPermission::CREATE_ROOM))
     else {
         return Err(StatusCode::FORBIDDEN);
     };
@@ -166,17 +172,31 @@ async fn room_create(
             },
             |row| row.get::<_, u64>(0),
         )?;
-        txn.execute(
+        let mut insert_user = txn.prepare(
+            r"
+            INSERT INTO `user` (`userkey`)
+            VALUES (?)
+            ON CONFLICT (`userkey`) DO NOTHING
+            ",
+        )?;
+        let mut insert_member = txn.prepare(
             r"
             INSERT INTO `room_member` (`rid`, `uid`, `permission`)
-            VALUES (:rid, :uid, :permission)
+            SELECT :rid, `uid`, :permission
+            FROM `user`
+            WHERE `userkey` = :userkey
             ",
-            named_params! {
-                ":rid": rid,
-                ":uid": uid,
-                ":permission": RoomPermission::ALL,
-            },
         )?;
+        for member in members {
+            insert_user.execute(params![member.user])?;
+            insert_member.execute(named_params! {
+                ":rid": rid,
+                ":userkey": member.user,
+                ":permission": member.permission,
+            })?;
+        }
+        drop(insert_member);
+        drop(insert_user);
         txn.commit()?;
         Ok(())
     })()
@@ -458,7 +478,7 @@ async fn room_post_item(
                 named_params! {
                     ":ruuid": ruuid,
                     ":userkey": &chat.signee.user,
-                    ":perm": RoomPermission::POST_CHAT,
+                    ":perm": MemberPermission::POST_CHAT,
                 },
                 |row| Ok((row.get::<_, u64>("rid")?, row.get::<_, u64>("uid")?)),
             )
