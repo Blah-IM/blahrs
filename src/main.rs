@@ -452,11 +452,13 @@ async fn room_post_item(
                 JOIN `room_member` USING (`rid`)
                 JOIN `user` USING (`uid`)
                 WHERE `ruuid` = :ruuid AND
-                    `userkey` = :userkey
+                    `userkey` = :userkey AND
+                    (`room_member`.`permission` & :perm) = :perm
                 ",
                 named_params! {
                     ":ruuid": ruuid,
                     ":userkey": &chat.signee.user,
+                    ":perm": RoomPermission::POST_CHAT,
                 },
                 |row| Ok((row.get::<_, u64>("rid")?, row.get::<_, u64>("uid")?)),
             )

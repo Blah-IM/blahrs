@@ -125,7 +125,7 @@ bitflags! {
 
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub struct RoomPermission: u64 {
-        const PUSH_CHAT = 1 << 0;
+        const POST_CHAT = 1 << 0;
         const ADD_MEMBER = 1 << 1;
 
         const ALL = !0;
