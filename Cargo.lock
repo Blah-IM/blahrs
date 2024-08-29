@@ -239,6 +239,7 @@ dependencies = [
  "serde-aux",
  "serde-constant",
  "serde_json",
+ "syn",
  "tokio",
  "tokio-stream",
  "tower-http",
