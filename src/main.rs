@@ -147,7 +147,7 @@ async fn room_create(
         .map_err(from_db_error)?
         .filter(|(_, perm)| perm.contains(ServerPermission::CREATE_ROOM))
     else {
-        return Err(StatusCode::UNAUTHORIZED);
+        return Err(StatusCode::FORBIDDEN);
     };
 
     let ruuid = Uuid::new_v4();
@@ -466,7 +466,7 @@ async fn room_post_item(
             .map_err(from_db_error)?
         else {
             tracing::debug!("rejected post: unpermitted user {}", chat.signee.user);
-            return Err(StatusCode::UNAUTHORIZED);
+            return Err(StatusCode::FORBIDDEN);
         };
 
         let cid = conn
