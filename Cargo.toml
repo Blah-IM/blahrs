@@ -7,7 +7,8 @@ edition = "2021"
 [dependencies]
 anyhow = "1.0.86"
 axum = { version = "0.7.5", features = ["tokio"] }
-bitflags = { version = "2.6.0", features = ["serde"] }
+bitflags = "2.6.0"
+bitflags_serde_shim = "0.2.5"
 clap = { version = "4.5.16", features = ["derive"] }
 ed25519-dalek = { version = "2.1.1", features = ["digest", "serde"] }
 futures-util = "0.3.30"

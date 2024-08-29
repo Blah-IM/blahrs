@@ -209,6 +209,12 @@ name = "bitflags"
 version = "2.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b048fb63fd8b5923fc5aa7b340d8e156aec7ec02f0c78fa8a6ddc2613f6f71de"
+
+[[package]]
+name = "bitflags_serde_shim"
+version = "0.2.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "df031780c32b0f93cecaf883fa9e351e74679e24380c534aeef94556cfd80ac9"
 dependencies = [
  "serde",
 ]
@@ -220,6 +226,7 @@ dependencies = [
  "anyhow",
  "axum",
  "bitflags",
+ "bitflags_serde_shim",
  "clap",
  "ed25519-dalek",
  "futures-util",

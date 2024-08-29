@@ -4,6 +4,7 @@ use std::time::SystemTime;
 
 use anyhow::{ensure, Context};
 use bitflags::bitflags;
+use bitflags_serde_shim::impl_serde_for_bitflags;
 use ed25519_dalek::{
     Signature, Signer, SigningKey, VerifyingKey, PUBLIC_KEY_LENGTH, SIGNATURE_LENGTH,
 };
@@ -115,14 +116,14 @@ pub enum RoomAdminPayload {
 }
 
 bitflags! {
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub struct ServerPermission: u64 {
         const CREATE_ROOM = 1 << 0;
 
         const ALL = !0;
     }
 
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub struct RoomPermission: u64 {
         const PUSH_CHAT = 1 << 0;
         const ADD_MEMBER = 1 << 1;
@@ -130,13 +131,17 @@ bitflags! {
         const ALL = !0;
     }
 
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
     pub struct RoomAttrs: u64 {
         const PUBLIC_READABLE = 1 << 0;
 
         const _ = !0;
     }
 }
+
+impl_serde_for_bitflags!(ServerPermission);
+impl_serde_for_bitflags!(RoomPermission);
+impl_serde_for_bitflags!(RoomAttrs);
 
 mod sql_impl {
     use rusqlite::types::{FromSql, FromSqlError, FromSqlResult, ToSqlOutput, ValueRef};
