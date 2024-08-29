@@ -92,7 +92,15 @@ pub type ChatItem = WithSig<ChatPayload>;
 #[serde(tag = "typ", rename = "create_room")]
 pub struct CreateRoomPayload {
     pub title: String,
+    pub attrs: RoomAttrs,
 }
+
+/// Proof of room membership for read-access.
+///
+/// TODO: Should we use JWT here instead?
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(tag = "typ", rename = "auth")]
+pub struct AuthPayload {}
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields, tag = "typ", rename_all = "snake_case")]
@@ -120,6 +128,13 @@ bitflags! {
         const ADD_MEMBER = 1 << 1;
 
         const ALL = !0;
+    }
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+    pub struct RoomAttrs: u64 {
+        const PUBLIC_READABLE = 1 << 0;
+
+        const _ = !0;
     }
 }
 
@@ -165,5 +180,5 @@ mod sql_impl {
         };
     }
 
-    impl_u64_flag!(ServerPermission, RoomPermission);
+    impl_u64_flag!(ServerPermission, RoomPermission, RoomAttrs);
 }

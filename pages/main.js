@@ -131,18 +131,32 @@ async function connectRoom(url) {
 
     log(`fetching room: ${url}`);
 
-    fetch(`${url}/item`)
-        .then((resp) => resp.json())
-        // TODO: This response format is to-be-decided.
-        .then(async (json) => {
-            const [{ title }, items] = json
-            document.title = `room: ${title}`
-            items.reverse();
-            for (const [_cid, chat] of items) {
-                await showChatMsg(chat);
-            }
-            log('---history---')
-        });
+    const auth = await signData({ typ: 'auth' });
+    fetch(
+        `${url}/item`,
+        {
+            headers: {
+                'Authorization': auth,
+            },
+        },
+    )
+    .then((resp) => {
+        if (!resp.ok) throw new Error(`status ${resp.status} ${resp.statusText}`);
+        return resp.json();
+    })
+    // TODO: This response format is to-be-decided.
+    .then(async (json) => {
+        const [{ title }, items] = json
+        document.title = `room: ${title}`
+        items.reverse();
+        for (const [_cid, chat] of items) {
+            await showChatMsg(chat);
+        }
+        log('---history---');
+    })
+    .catch((e) => {
+        log(`failed to fetch history: ${e}`);
+    });
 
     // TODO: There is a time window where events would be lost.
 
@@ -161,23 +175,14 @@ async function connectRoom(url) {
     };
 }
 
-async function postChat(text) {
-    text = text.trim();
-    if (keypair === null || roomUuid === null || text === '') return;
-
-    chatInput.disabled = true;
-
+async function signData(payload) {
     const userKey = bufToHex(await crypto.subtle.exportKey('raw', keypair.publicKey));
     const nonceBuf = new Uint32Array(1);
     crypto.getRandomValues(nonceBuf);
     const timestamp = (Number(new Date()) / 1000) | 0;
     const signee = {
         nonce: nonceBuf[0],
-        payload: {
-            typ: 'chat',
-            room: roomUuid,
-            text,
-        },
+        payload,
         timestamp,
         user: userKey,
     };
@@ -185,12 +190,25 @@ async function postChat(text) {
     const signeeBytes = (new TextEncoder()).encode(JSON.stringify(signee));
     const sig = await crypto.subtle.sign('Ed25519', keypair.privateKey, signeeBytes);
 
-    const payload = JSON.stringify({ sig: bufToHex(sig), signee });
+    return JSON.stringify({ sig: bufToHex(sig), signee });
+}
+
+async function postChat(text) {
+    text = text.trim();
+    if (keypair === null || roomUuid === null || text === '') return;
+
+    chatInput.disabled = true;
+
     try {
+        const signedPayload = await signData({
+            typ: 'chat',
+            room: roomUuid,
+            text,
+        });
         const resp = await fetch(`${roomUrl}/item`, {
             method: 'POST',
             cache: 'no-cache',
-            body: payload,
+            body: signedPayload,
             headers: {
                 'Content-Type': 'application/json',
             },

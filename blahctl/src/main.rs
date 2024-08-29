@@ -4,7 +4,7 @@ use std::{fs, io};
 
 use anyhow::{Context, Result};
 use bitflags::Flags;
-use blah::types::{ChatPayload, CreateRoomPayload, ServerPermission, UserKey, WithSig};
+use blah::types::{ChatPayload, CreateRoomPayload, RoomAttrs, ServerPermission, UserKey, WithSig};
 use ed25519_dalek::pkcs8::spki::der::pem::LineEnding;
 use ed25519_dalek::pkcs8::{DecodePrivateKey, DecodePublicKey, EncodePrivateKey, EncodePublicKey};
 use ed25519_dalek::{SigningKey, VerifyingKey, PUBLIC_KEY_LENGTH};
@@ -77,6 +77,9 @@ enum ApiCommand {
 
         #[arg(long)]
         title: String,
+
+        #[arg(long, value_parser = flag_parser::<RoomAttrs>)]
+        attrs: Option<RoomAttrs>,
     },
     PostChat {
         #[arg(long, short = 'f')]
@@ -201,9 +204,14 @@ async fn main_api(api_url: Url, command: ApiCommand) -> Result<()> {
         ApiCommand::CreateRoom {
             private_key_file,
             title,
+            attrs,
         } => {
             let key = load_signing_key(&private_key_file)?;
-            let payload = WithSig::sign(&key, &mut OsRng, CreateRoomPayload { title })?;
+            let payload = CreateRoomPayload {
+                title,
+                attrs: attrs.unwrap_or_default(),
+            };
+            let payload = WithSig::sign(&key, &mut OsRng, payload)?;
 
             let ret = client
                 .post(api_url.join("/room/create")?)

@@ -10,7 +10,8 @@ CREATE TABLE IF NOT EXISTS `user` (
 CREATE TABLE IF NOT EXISTS `room` (
     `rid`       INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
     `ruuid`     BLOB NOT NULL UNIQUE,
-    `title`     TEXT NOT NULL
+    `title`     TEXT NOT NULL,
+    `attrs`     INTEGER NOT NULL
 ) STRICT;
 
 CREATE TABLE IF NOT EXISTS `room_member` (

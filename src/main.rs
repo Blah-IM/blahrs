@@ -6,16 +6,17 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
 
 use anyhow::{ensure, Context, Result};
-use axum::extract::{FromRequest, Path, Query, Request, State};
-use axum::http::{header, StatusCode};
+use axum::extract::{FromRequest, FromRequestParts, Path, Query, Request, State};
+use axum::http::{header, request, StatusCode};
 use axum::response::{sse, IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{async_trait, Json, Router};
 use blah::types::{
-    ChatItem, ChatPayload, CreateRoomPayload, RoomPermission, ServerPermission, Signee, WithSig,
+    AuthPayload, ChatItem, ChatPayload, CreateRoomPayload, RoomAttrs, RoomPermission,
+    ServerPermission, Signee, UserKey, WithSig,
 };
 use ed25519_dalek::SIGNATURE_LENGTH;
-use rusqlite::{named_params, params, OptionalExtension};
+use rusqlite::{named_params, params, OptionalExtension, Row};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use tokio::sync::broadcast;
@@ -198,9 +199,11 @@ async fn room_get_item(
     st: ArcState,
     Path(ruuid): Path<Uuid>,
     params: Query<GetRoomItemParams>,
+    OptionalAuth(user): OptionalAuth,
 ) -> Result<impl IntoResponse, StatusCode> {
     let (room_meta, items) =
-        query_room_items(&st.conn.lock().unwrap(), ruuid, &params).map_err(from_db_error)?;
+        query_room_items(&st.conn.lock().unwrap(), ruuid, user.as_ref(), &params)
+            .map_err(from_db_error)?;
 
     // TODO: This format is to-be-decided. Or do we even need this interface other than
     // `feed.json`?
@@ -213,7 +216,7 @@ async fn room_get_feed(
     params: Query<GetRoomItemParams>,
 ) -> Result<impl IntoResponse, StatusCode> {
     let (room_meta, items) =
-        query_room_items(&st.conn.lock().unwrap(), ruuid, &params).map_err(from_db_error)?;
+        query_room_items(&st.conn.lock().unwrap(), ruuid, None, &params).map_err(from_db_error)?;
 
     let items = items
         .into_iter()
@@ -292,27 +295,51 @@ struct FeedItemExtra {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct RoomMetadata {
     pub title: String,
+    pub attrs: RoomAttrs,
+}
+
+fn get_room_if_readable<T>(
+    conn: &rusqlite::Connection,
+    ruuid: Uuid,
+    user: Option<&UserKey>,
+    f: impl FnOnce(&Row<'_>) -> rusqlite::Result<T>,
+) -> rusqlite::Result<T> {
+    conn.query_row(
+        r"
+        SELECT `rid`, `title`, `attrs`
+        FROM `room`
+        WHERE `ruuid` = :ruuid AND
+            ((`attrs` & :perm) = :perm OR
+            EXISTS(SELECT 1
+                FROM `room_member`
+                JOIN `user` USING (`uid`)
+                WHERE `room_member`.`rid` = `room`.`rid` AND
+                    `userkey` = :userkey))
+        ",
+        named_params! {
+            ":perm": RoomAttrs::PUBLIC_READABLE,
+            ":ruuid": ruuid,
+            ":userkey": user,
+        },
+        f,
+    )
 }
 
 fn query_room_items(
     conn: &rusqlite::Connection,
     ruuid: Uuid,
+    user: Option<&UserKey>,
     params: &GetRoomItemParams,
 ) -> rusqlite::Result<(RoomMetadata, Vec<(u64, ChatItem)>)> {
-    let (rid, title) = conn.query_row(
-        r"
-        SELECT `rid`, `title`
-        FROM `room`
-        WHERE `ruuid` = ?
-        ",
-        params![ruuid],
-        |row| {
-            let rid = row.get::<_, u64>("rid")?;
-            let title = row.get::<_, String>("title")?;
-            Ok((rid, title))
-        },
-    )?;
-    let room_meta = RoomMetadata { title };
+    let (rid, title, attrs) = get_room_if_readable(conn, ruuid, user, |row| {
+        Ok((
+            row.get::<_, u64>("rid")?,
+            row.get::<_, String>("title")?,
+            row.get::<_, RoomAttrs>("attrs")?,
+        ))
+    })?;
+
+    let room_meta = RoomMetadata { title, attrs };
 
     let mut stmt = conn.prepare(
         r"
@@ -371,6 +398,38 @@ impl<S: Send + Sync, T: Serialize + DeserializeOwned> FromRequest<S> for SignedJ
             StatusCode::BAD_REQUEST.into_response()
         })?;
         Ok(Self(data))
+    }
+}
+
+/// Extractor for optional verified JSON authorization header.
+#[derive(Debug)]
+struct OptionalAuth(Option<UserKey>);
+
+#[async_trait]
+impl<S: Send + Sync> FromRequestParts<S> for OptionalAuth {
+    type Rejection = StatusCode;
+
+    async fn from_request_parts(
+        parts: &mut request::Parts,
+        _state: &S,
+    ) -> Result<Self, Self::Rejection> {
+        let Some(auth) = parts.headers.get(header::AUTHORIZATION) else {
+            return Ok(Self(None));
+        };
+
+        let ret = serde_json::from_slice::<WithSig<AuthPayload>>(auth.as_bytes())
+            .context("invalid JSON")
+            .and_then(|data| {
+                data.verify()?;
+                Ok(data.signee.user)
+            });
+        match ret {
+            Ok(user) => Ok(Self(Some(user))),
+            Err(err) => {
+                tracing::debug!(%err, "invalid authorization");
+                Err(StatusCode::BAD_REQUEST)
+            }
+        }
     }
 }
 
@@ -443,23 +502,17 @@ async fn room_post_item(
 }
 
 async fn room_event(
-    Path(ruuid): Path<Uuid>,
     st: ArcState,
+    Path(ruuid): Path<Uuid>,
+    // TODO: There is actually no way to add headers via `EventSource` in client side.
+    // But this API is kinda temporary and need a better replacement anyway.
+    // So just only support public room for now.
+    OptionalAuth(user): OptionalAuth,
 ) -> Result<impl IntoResponse, StatusCode> {
-    let rid = st
-        .conn
-        .lock()
-        .unwrap()
-        .query_row(
-            r"
-            SELECT `rid`
-            FROM `room`
-            WHERE `ruuid` = ?
-            ",
-            params![ruuid],
-            |row| row.get::<_, u64>(0),
-        )
-        .map_err(from_db_error)?;
+    let rid = get_room_if_readable(&st.conn.lock().unwrap(), ruuid, user.as_ref(), |row| {
+        row.get::<_, u64>(0)
+    })
+    .map_err(from_db_error)?;
 
     let rx = match st.room_listeners.lock().unwrap().entry(rid) {
         Entry::Occupied(ent) => ent.get().subscribe(),
