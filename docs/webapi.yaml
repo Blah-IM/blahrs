@@ -1,0 +1,122 @@
+openapi: 3.1.0
+info:
+  title: Blah Chatserver Proto
+  version: 0.0.1
+
+paths:
+  /room/create:
+    post:
+      summary: Create a new room
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: WithSig<CreateRoomPayload>
+              example:
+                sig: 99a77e836538268839ed3419c649eefb043cb51d448f641cc2a1c523811aab4aacd09f92e7c0688ffd659bfc6acb764fea79979a491e132bf6a56dd23adc1d09
+                signee:
+                  nonce: 670593955
+                  payload:
+                    typ: create_room
+                    attrs: 1 # PUBLIC_READABLE
+                    title: 'hello room'
+                    members:
+                      - user: 83ce46ced47ec0391c64846cbb6c507250ead4985b6a044d68751edc46015dd7
+                        permission: -1
+                  timestamp: 1724966284
+                  user: 83ce46ced47ec0391c64846cbb6c507250ead4985b6a044d68751edc46015dd7
+      responses:
+        200:
+          content:
+            application/json:
+              type: string
+              description: UUID of the newly created room (ruuid).
+        403:
+          description: The user does not have permission to create room.
+
+  /room/{ruuid}/feed.json:
+    get:
+      summary: JSON feed of room {ruuid}, which must be public readable
+      description: For human and feed reader consumption only.
+      responses:
+        200:
+          text/feed+json:
+            scheme:
+              $ref: 'https://www.jsonfeed.org/version/1.1/'
+        404:
+          description: Room does not exist or is private.
+
+  /room/{ruuid}/item:
+    get:
+      summary: Get chat history for room {ruuid}
+      description: |
+        Return chat items in reversed time order, up to PAGE_LEN items.
+        The last (oldest) chat id can be used as query parameter for the next
+        GET, to repeatly fetch full history.
+      headers:
+        Authorization:
+          description: Proof of membership for private rooms.
+          required: false
+          schema:
+            $ret: WithSig<AuthPayload>
+      parameters:
+        before_id:
+          description: Filter items before (not including) a given chat id (cid).
+          in: query
+      responses:
+        200:
+          content:
+            application/json:
+              x-description: TODO
+
+    post:
+      summary: Post a chat in room {ruuid}
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: WithSig<ChatPayload>
+              example:
+                sig: 99a77e836538268839ed3419c649eefb043cb51d448f641cc2a1c523811aab4aacd09f92e7c0688ffd659bfc6acb764fea79979a491e132bf6a56dd23adc1d09
+                signee:
+                  nonce: 670593955
+                  payload:
+                    typ: chat
+                    room: 7ed9e067-ec37-4054-9fc2-b1bd890929bd
+                    text: helloo
+                  timestamp: 1724966284
+                  user: 83ce46ced47ec0391c64846cbb6c507250ead4985b6a044d68751edc46015dd7
+      responses:
+        200:
+          content:
+            application/json:
+              type: integer
+              description: Created chat id (cid).
+        400:
+          description: Body is invalid or fails the verification.
+        403:
+          description: The user does not have permission to post in this room.
+        404:
+          description: Room not found.
+
+  /room/{ruuid}/event:
+    get:
+      summary: Get an event stream for future new items.
+      description: |
+        This is a temporary interface, before a better notification system
+        (post notifications? websocket?) is implemented.
+      headers:
+        Authorization:
+          description: Proof of membership for private rooms.
+          required: false
+          schema:
+            $ret: WithSig<AuthPayload>
+      responses:
+        200:
+          content:
+            text/event-stream:
+              x-description: An event stream, each event is a JSON with type WithSig<ChatPayload>
+        400:
+          description: Body is invalid or fails the verification.
+        404:
+          description: Room not found.
