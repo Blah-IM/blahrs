@@ -12,7 +12,8 @@ use ed25519_dalek::{
     Signature, Signer, SigningKey, VerifyingKey, PUBLIC_KEY_LENGTH, SIGNATURE_LENGTH,
 };
 use rand_core::RngCore;
-use serde::{Deserialize, Serialize};
+use serde::{de, Deserialize, Deserializer, Serialize};
+use serde_tuple::{Deserialize_tuple, Serialize_tuple};
 use uuid::Uuid;
 
 const TIMESTAMP_TOLERENCE: u64 = 90;
@@ -83,8 +84,184 @@ impl<T: Serialize> WithSig<T> {
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "typ", rename = "chat")]
 pub struct ChatPayload {
+    pub rich_text: RichText,
     pub room: Uuid,
+}
+
+/// Ref: <https://github.com/Blah-IM/Weblah/blob/a3fa0f265af54c846f8d65f42aa4409c8dba9dd9/src/lib/richText.ts>
+#[derive(Debug, Default, PartialEq, Eq, Serialize)]
+#[serde(transparent)]
+pub struct RichText(pub Vec<RichTextPiece>);
+
+// NB. This field is excluded from field order check, because it has tuple representation.
+#[derive(Debug, PartialEq, Eq, Serialize_tuple)]
+pub struct RichTextPiece {
     pub text: String,
+    #[serde(skip_serializing_if = "is_default::<TextAttrs>")]
+    pub attrs: TextAttrs,
+}
+
+/// The protocol representation of `RichTextPiece` which keeps nullity of `attrs` for
+/// canonicalization check.
+// NB. This field is excluded from field order check, because it has tuple representation.
+#[derive(Debug, Deserialize_tuple)]
+struct RichTextPieceRaw {
+    pub text: String,
+    #[serde(default, skip_serializing_if = "is_default::<TextAttrs>")]
+    pub attrs: Option<TextAttrs>,
+}
+
+fn is_default<T: Default + PartialEq>(v: &T) -> bool {
+    *v == T::default()
+}
+
+impl<'de> Deserialize<'de> for RichText {
+    fn deserialize<D>(de: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let pieces = <Vec<RichTextPieceRaw>>::deserialize(de)?;
+        if pieces
+            .iter()
+            .any(|p| matches!(&p.attrs, Some(attrs) if is_default(attrs)))
+        {
+            return Err(de::Error::custom("not in canonical form"));
+        }
+        let this = Self(
+            pieces
+                .into_iter()
+                .map(|RichTextPieceRaw { text, attrs }| RichTextPiece {
+                    text,
+                    attrs: attrs.unwrap_or_default(),
+                })
+                .collect(),
+        );
+        if !this.is_canonical() {
+            return Err(de::Error::custom("not in canonical form"));
+        }
+        Ok(this)
+    }
+}
+
+// TODO: This protocol format is quite large. Could use bitflags for database.
+#[derive(Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TextAttrs {
+    #[serde(default, rename = "b", skip_serializing_if = "is_default")]
+    pub bold: bool,
+    #[serde(default, rename = "m", skip_serializing_if = "is_default")]
+    pub code: bool,
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub hashtag: bool,
+    #[serde(default, rename = "i", skip_serializing_if = "is_default")]
+    pub italic: bool,
+    // TODO: Should we validate and/or filter the URL.
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub link: Option<String>,
+    #[serde(default, rename = "s", skip_serializing_if = "is_default")]
+    pub strike: bool,
+    #[serde(default, rename = "u", skip_serializing_if = "is_default")]
+    pub underline: bool,
+}
+
+impl From<&'_ str> for RichText {
+    fn from(text: &'_ str) -> Self {
+        text.to_owned().into()
+    }
+}
+
+impl From<String> for RichText {
+    fn from(text: String) -> Self {
+        if text.is_empty() {
+            Self::default()
+        } else {
+            Self(vec![RichTextPiece {
+                text,
+                attrs: TextAttrs::default(),
+            }])
+        }
+    }
+}
+
+impl From<&'_ str> for RichTextPiece {
+    fn from(text: &'_ str) -> Self {
+        text.to_owned().into()
+    }
+}
+
+impl From<String> for RichTextPiece {
+    fn from(text: String) -> Self {
+        Self {
+            text,
+            attrs: TextAttrs::default(),
+        }
+    }
+}
+
+impl RichText {
+    /// Is this rich text valid and in the canonical form?
+    ///
+    /// This is automatically enforced by `Deserialize` impl.
+    pub fn is_canonical(&self) -> bool {
+        self.0.iter().all(|p| !p.text.is_empty())
+            && self.0.windows(2).all(|w| w[0].attrs != w[1].attrs)
+    }
+
+    /// Format the text into plain text, stripping all styles.
+    pub fn plain_text(&self) -> impl fmt::Display + '_ {
+        struct Fmt<'a>(&'a RichText);
+        impl fmt::Display for Fmt<'_> {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                for p in &self.0 .0 {
+                    f.write_str(&p.text)?;
+                }
+                Ok(())
+            }
+        }
+
+        Fmt(self)
+    }
+
+    /// Format the text into HTML.
+    pub fn html(&self) -> impl fmt::Display + '_ {
+        struct Fmt<'a>(&'a RichText);
+        impl fmt::Display for Fmt<'_> {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                for p in &self.0 .0 {
+                    let tags = [
+                        (p.attrs.bold, "<b>", "</b>"),
+                        (p.attrs.code, "<code>", "</code>"),
+                        (p.attrs.italic, "<i>", "</i>"),
+                        (p.attrs.strike, "<strike>", "</strike>"),
+                        (p.attrs.underline, "<u>", "</u>"),
+                        (p.attrs.hashtag || p.attrs.link.is_some(), "", "</a>"),
+                    ];
+                    for (cond, begin, _) in tags {
+                        if cond {
+                            f.write_str(begin)?;
+                        }
+                    }
+                    if p.attrs.hashtag {
+                        // TODO: Link target for hashtag?
+                        write!(f, r#"<a class="hashtag">"#)?;
+                    } else if let Some(link) = &p.attrs.link {
+                        let href = html_escape::encode_quoted_attribute(link);
+                        write!(f, r#"<a target="_blank" href="{href}""#)?;
+                        let href = html_escape::encode_quoted_attribute(link);
+                        write!(f, r#"<a target="_blank" href="{href}""#)?;
+                    }
+                    f.write_str(&p.text)?;
+                    for (cond, _, end) in tags.iter().rev() {
+                        if *cond {
+                            f.write_str(end)?;
+                        }
+                    }
+                }
+                Ok(())
+            }
+        }
+
+        Fmt(self)
+    }
 }
 
 pub type ChatItem = WithSig<ChatPayload>;
@@ -201,6 +378,21 @@ mod sql_impl {
         }
     }
 
+    impl ToSql for RichText {
+        fn to_sql(&self) -> Result<ToSqlOutput<'_>> {
+            assert!(self.is_canonical());
+            let json = serde_json::to_string(&self).expect("serialization cannot fail");
+            Ok(json.into())
+        }
+    }
+
+    impl FromSql for RichText {
+        fn column_result(value: ValueRef<'_>) -> FromSqlResult<Self> {
+            serde_json::from_str::<Self>(value.as_str()?)
+                .map_err(|err| FromSqlError::Other(format!("invalid rich text: {err}").into()))
+        }
+    }
+
     macro_rules! impl_u64_flag {
         ($($name:ident),*) => {
             $(
@@ -228,10 +420,16 @@ mod sql_impl {
 mod tests {
     use std::fmt::Write;
 
+    use syn::visit;
+
+    use super::*;
+
     #[derive(Default)]
     struct Visitor {
         errors: String,
     }
+
+    const SKIP_CHECK_STRUCTS: &[&str] = &["RichTextPiece", "RichTextPieceRaw"];
 
     impl<'ast> syn::visit::Visit<'ast> for Visitor {
         fn visit_fields_named(&mut self, i: &'ast syn::FieldsNamed) {
@@ -243,6 +441,12 @@ mod tests {
                 .collect::<Vec<_>>();
             if !fields.windows(2).all(|w| w[0] < w[1]) {
                 writeln!(self.errors, "unsorted fields: {fields:?}").unwrap();
+            }
+        }
+
+        fn visit_item_struct(&mut self, i: &'ast syn::ItemStruct) {
+            if !SKIP_CHECK_STRUCTS.contains(&&*i.ident.to_string()) {
+                visit::visit_item_struct(self, i);
             }
         }
     }
@@ -257,5 +461,37 @@ mod tests {
         if !v.errors.is_empty() {
             panic!("{}", v.errors);
         }
+    }
+
+    #[test]
+    fn rich_text_serde() {
+        let raw =
+            r#"[["before "],["bold ",{"b":true}],["italic bold ",{"b":true,"i":true}],["end"]]"#;
+        let text = serde_json::from_str::<RichText>(raw).unwrap();
+        assert!(text.is_canonical());
+        assert_eq!(
+            text,
+            RichText(vec![
+                "before ".into(),
+                RichTextPiece {
+                    text: "bold ".into(),
+                    attrs: TextAttrs {
+                        bold: true,
+                        ..TextAttrs::default()
+                    }
+                },
+                RichTextPiece {
+                    text: "italic bold ".into(),
+                    attrs: TextAttrs {
+                        italic: true,
+                        bold: true,
+                        ..TextAttrs::default()
+                    }
+                },
+                "end".into(),
+            ]),
+        );
+        let got = serde_json::to_string(&text).unwrap();
+        assert_eq!(got, raw);
     }
 }

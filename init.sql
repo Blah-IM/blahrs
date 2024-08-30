@@ -28,5 +28,5 @@ CREATE TABLE IF NOT EXISTS `room_item` (
     `timestamp` INTEGER NOT NULL,
     `nonce`     INTEGER NOT NULL,
     `sig`       BLOB NOT NULL,
-    `message`   TEXT NOT NULL
+    `rich_text` TEXT NOT NULL
 ) STRICT;

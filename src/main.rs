@@ -247,7 +247,7 @@ async fn room_get_feed(
             };
             FeedItem {
                 id: cid.to_string(),
-                content_text: item.signee.payload.text,
+                content_html: item.signee.payload.rich_text.html().to_string(),
                 date_published: humantime::format_rfc3339(time).to_string(),
                 authors: (author,),
                 extra: FeedItemExtra {
@@ -292,7 +292,7 @@ struct FeedRoom {
 #[derive(Debug, Serialize)]
 struct FeedItem {
     id: String,
-    content_text: String,
+    content_html: String,
     date_published: String,
     authors: (FeedAuthor,),
     #[serde(rename = "_blah")]
@@ -363,7 +363,7 @@ fn query_room_items(
 
     let mut stmt = conn.prepare(
         r"
-        SELECT `cid`, `timestamp`, `nonce`, `sig`, `userkey`, `sig`, `message`
+        SELECT `cid`, `timestamp`, `nonce`, `sig`, `userkey`, `sig`, `rich_text`
         FROM `room_item`
         JOIN `user` USING (`uid`)
         WHERE `rid` = :rid AND
@@ -389,7 +389,7 @@ fn query_room_items(
                         user: row.get("userkey")?,
                         payload: ChatPayload {
                             room: ruuid,
-                            text: row.get("message")?,
+                            rich_text: row.get("rich_text")?,
                         },
                     },
                 };
@@ -492,8 +492,8 @@ async fn room_post_item(
         let cid = conn
             .query_row(
                 r"
-                INSERT INTO `room_item` (`rid`, `uid`, `timestamp`, `nonce`, `sig`, `message`)
-                VALUES (:rid, :uid, :timestamp, :nonce, :sig, :message)
+                INSERT INTO `room_item` (`rid`, `uid`, `timestamp`, `nonce`, `sig`, `rich_text`)
+                VALUES (:rid, :uid, :timestamp, :nonce, :sig, :rich_text)
                 RETURNING `cid`
                 ",
                 named_params! {
@@ -501,7 +501,7 @@ async fn room_post_item(
                     ":uid": uid,
                     ":timestamp": chat.signee.timestamp,
                     ":nonce": chat.signee.nonce,
-                    ":message": &chat.signee.payload.text,
+                    ":rich_text": &chat.signee.payload.rich_text,
                     ":sig": chat.sig,
                 },
                 |row| row.get::<_, u64>(0),

@@ -111,8 +111,45 @@ async function showChatMsg(chat) {
 
     const el = document.createElement('div', {});
     el.classList.add('msg');
-    el.innerText = `${shortUser} [${time}] [${verifyRet}]: ${chat.signee.payload.text}`;
+    const elHeader = document.createElement('span', {});
+    const elContent = document.createElement('span', {});
+    elHeader.innerText = `${shortUser} [${time}] [${verifyRet}]:`;
+    elContent.innerHTML = richTextToHtml(chat.signee.payload.rich_text);
+    el.appendChild(elHeader);
+    el.appendChild(elContent);
     appendMsg(el)
+}
+
+function richTextToHtml(richText) {
+    let ret = ''
+    for (let [text, attrs] of richText) {
+        if (attrs === undefined) attrs = {};
+        // Incomplete cases.
+        const tags = [
+            [attrs.b, 'b'],
+            [attrs.i, 'i'],
+            [attrs.m, 'code'],
+            [attrs.s, 'strike'],
+            [attrs.u, 'u'],
+        ];
+        for (const [cond, tag] of tags) {
+            if (cond) ret += `<${tag}>`;
+        }
+        ret += escapeHtml(text);
+        tags.reverse();
+        for (const [cond, tag] of tags) {
+            if (cond) ret += `</${tag}>`;
+        }
+    }
+    return ret;
+}
+
+function escapeHtml(text) {
+    return text.replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#039;');
 }
 
 async function connectRoom(url) {
@@ -200,10 +237,16 @@ async function postChat(text) {
     chatInput.disabled = true;
 
     try {
+        let richText;
+        if (text.startsWith('[')) {
+            richText = JSON.parse(text);
+        } else {
+            richText = [[text]];
+        }
         const signedPayload = await signData({
             typ: 'chat',
+            rich_text: richText,
             room: roomUuid,
-            text,
         });
         const resp = await fetch(`${roomUrl}/item`, {
             method: 'POST',
