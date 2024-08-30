@@ -83,7 +83,7 @@ paths:
                   payload:
                     typ: chat
                     room: 7ed9e067-ec37-4054-9fc2-b1bd890929bd
-                    rich_text: [["before "],["bold ",{"b":true}],["italic bold ",{"b":true,"i":true}],["end"]]
+                    rich_text: ["before ",["bold ",{"b":true}],["italic bold ",{"b":true,"i":true}],"end"]
                   timestamp: 1724966284
                   user: 83ce46ced47ec0391c64846cbb6c507250ead4985b6a044d68751edc46015dd7
       responses:

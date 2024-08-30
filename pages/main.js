@@ -122,8 +122,8 @@ async function showChatMsg(chat) {
 
 function richTextToHtml(richText) {
     let ret = ''
-    for (let [text, attrs] of richText) {
-        if (attrs === undefined) attrs = {};
+    for (let e of richText) {
+        const [text, attrs] = typeof e === 'string' ? [e, {}] : e;
         // Incomplete cases.
         const tags = [
             [attrs.b, 'b'],
@@ -241,7 +241,7 @@ async function postChat(text) {
         if (text.startsWith('[')) {
             richText = JSON.parse(text);
         } else {
-            richText = [[text]];
+            richText = [text];
         }
         const signedPayload = await signData({
             typ: 'chat',

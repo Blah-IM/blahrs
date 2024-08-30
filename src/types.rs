@@ -12,8 +12,7 @@ use ed25519_dalek::{
     Signature, Signer, SigningKey, VerifyingKey, PUBLIC_KEY_LENGTH, SIGNATURE_LENGTH,
 };
 use rand_core::RngCore;
-use serde::{de, Deserialize, Deserializer, Serialize};
-use serde_tuple::{Deserialize_tuple, Serialize_tuple};
+use serde::{de, Deserialize, Deserializer, Serialize, Serializer};
 use uuid::Uuid;
 
 const TIMESTAMP_TOLERENCE: u64 = 90;
@@ -93,22 +92,31 @@ pub struct ChatPayload {
 #[serde(transparent)]
 pub struct RichText(pub Vec<RichTextPiece>);
 
-// NB. This field is excluded from field order check, because it has tuple representation.
-#[derive(Debug, PartialEq, Eq, Serialize_tuple)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct RichTextPiece {
-    pub text: String,
-    #[serde(skip_serializing_if = "is_default::<TextAttrs>")]
     pub attrs: TextAttrs,
+    pub text: String,
 }
 
-/// The protocol representation of `RichTextPiece` which keeps nullity of `attrs` for
-/// canonicalization check.
-// NB. This field is excluded from field order check, because it has tuple representation.
-#[derive(Debug, Deserialize_tuple)]
-struct RichTextPieceRaw {
-    pub text: String,
-    #[serde(default, skip_serializing_if = "is_default::<TextAttrs>")]
-    pub attrs: Option<TextAttrs>,
+impl Serialize for RichTextPiece {
+    fn serialize<S>(&self, ser: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        if is_default(&self.attrs) {
+            self.text.serialize(ser)
+        } else {
+            (&self.text, &self.attrs).serialize(ser)
+        }
+    }
+}
+
+/// The protocol representation of `RichTextPiece`.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+enum RichTextPieceRaw {
+    Text(String),
+    TextWithAttrs(String, TextAttrs),
 }
 
 fn is_default<T: Default + PartialEq>(v: &T) -> bool {
@@ -123,16 +131,19 @@ impl<'de> Deserialize<'de> for RichText {
         let pieces = <Vec<RichTextPieceRaw>>::deserialize(de)?;
         if pieces
             .iter()
-            .any(|p| matches!(&p.attrs, Some(attrs) if is_default(attrs)))
+            .any(|p| matches!(&p, RichTextPieceRaw::TextWithAttrs(_, attrs) if is_default(attrs)))
         {
             return Err(de::Error::custom("not in canonical form"));
         }
         let this = Self(
             pieces
                 .into_iter()
-                .map(|RichTextPieceRaw { text, attrs }| RichTextPiece {
-                    text,
-                    attrs: attrs.unwrap_or_default(),
+                .map(|raw| {
+                    let (text, attrs) = match raw {
+                        RichTextPieceRaw::Text(text) => (text, TextAttrs::default()),
+                        RichTextPieceRaw::TextWithAttrs(text, attrs) => (text, attrs),
+                    };
+                    RichTextPiece { text, attrs }
                 })
                 .collect(),
         );
@@ -144,7 +155,7 @@ impl<'de> Deserialize<'de> for RichText {
 }
 
 // TODO: This protocol format is quite large. Could use bitflags for database.
-#[derive(Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TextAttrs {
     #[serde(default, rename = "b", skip_serializing_if = "is_default")]
     pub bold: bool,
@@ -286,7 +297,7 @@ pub struct RoomMemberList(pub Vec<RoomMember>);
 impl Serialize for RoomMemberList {
     fn serialize<S>(&self, ser: S) -> Result<S::Ok, S::Error>
     where
-        S: serde::Serializer,
+        S: Serializer,
     {
         self.0.serialize(ser)
     }
@@ -465,8 +476,7 @@ mod tests {
 
     #[test]
     fn rich_text_serde() {
-        let raw =
-            r#"[["before "],["bold ",{"b":true}],["italic bold ",{"b":true,"i":true}],["end"]]"#;
+        let raw = r#"["before ",["bold ",{"b":true}],["italic bold ",{"b":true,"i":true}],"end"]"#;
         let text = serde_json::from_str::<RichText>(raw).unwrap();
         assert!(text.is_canonical());
         assert_eq!(
