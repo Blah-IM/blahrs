@@ -1,0 +1,8 @@
+{
+  "rust": {
+    "entry": "blah"
+  },
+  "start_command": "/app/main --listen=0.0.0.0:8080 --database=/db.sqlite3 --base-url=https://blah-backend.zeabur.app",
+  "build_command": "apt update && apt install -y sqlite3",
+  "pre_start_command": "apt update && apt install -y sqlite3 && rm -rf /var/lib/apt/lists/*"
+}
