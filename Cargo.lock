@@ -224,28 +224,16 @@ name = "blah"
 version = "0.0.0"
 dependencies = [
  "anyhow",
- "axum",
  "bitflags",
  "bitflags_serde_shim",
- "clap",
  "ed25519-dalek",
- "futures-util",
  "hex",
  "html-escape",
- "humantime",
  "rand_core",
  "rusqlite",
- "sd-notify",
  "serde",
- "serde-aux",
- "serde-constant",
  "serde_json",
  "syn",
- "tokio",
- "tokio-stream",
- "tower-http",
- "tracing",
- "tracing-subscriber",
  "uuid",
 ]
 
@@ -254,7 +242,6 @@ name = "blahctl"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "bitflags",
  "blah",
  "clap",
  "ed25519-dalek",
@@ -263,6 +250,30 @@ dependencies = [
  "reqwest",
  "rusqlite",
  "tokio",
+]
+
+[[package]]
+name = "blahd"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "axum",
+ "blah",
+ "clap",
+ "ed25519-dalek",
+ "futures-util",
+ "hex",
+ "humantime",
+ "rusqlite",
+ "sd-notify",
+ "serde",
+ "serde-aux",
+ "serde_json",
+ "tokio",
+ "tokio-stream",
+ "tower-http",
+ "tracing",
+ "tracing-subscriber",
  "uuid",
 ]
 
@@ -462,7 +473,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "115531babc129696a58c64a4fef0a8bf9e9698629fb97e9e40767d235cfbcd53"
 dependencies = [
  "pkcs8",
- "serde",
  "signature",
 ]
 
@@ -477,7 +487,6 @@ dependencies = [
  "rand_core",
  "serde",
  "sha2",
- "signature",
  "subtle",
  "zeroize",
 ]
@@ -1415,15 +1424,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "serde-constant"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "301d0de95fe56444b1ea1ee62363452b756fe715fb4eab505be16b906599b47e"
-dependencies = [
- "serde",
-]
-
-[[package]]
 name = "serde_derive"
 version = "1.0.209"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1500,7 +1500,6 @@ version = "2.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "77549399552de45a898a580c1b41d445bf730df867cc44e6c0233bbc4b8329de"
 dependencies = [
- "digest",
  "rand_core",
 ]
 

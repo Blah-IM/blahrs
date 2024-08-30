@@ -3,11 +3,12 @@ use std::path::{Path, PathBuf};
 use std::{fs, io};
 
 use anyhow::{Context, Result};
-use bitflags::Flags;
+use blah::bitflags;
 use blah::types::{
     ChatPayload, CreateRoomPayload, MemberPermission, RichText, RoomAttrs, RoomMember,
     RoomMemberList, ServerPermission, UserKey, WithSig,
 };
+use blah::uuid::Uuid;
 use ed25519_dalek::pkcs8::spki::der::pem::LineEnding;
 use ed25519_dalek::pkcs8::{DecodePrivateKey, DecodePublicKey, EncodePrivateKey, EncodePublicKey};
 use ed25519_dalek::{SigningKey, VerifyingKey, PUBLIC_KEY_LENGTH};
@@ -15,7 +16,6 @@ use rand::rngs::OsRng;
 use reqwest::Url;
 use rusqlite::{named_params, Connection};
 use tokio::runtime::Runtime;
-use uuid::Uuid;
 
 /// NB. Sync with docs of [`User::url`].
 const KEY_URL_SUBPATH: &str = "/.well-known/blah/key";
@@ -66,7 +66,7 @@ enum DbCommand {
     },
 }
 
-fn flag_parser<T: Flags>(s: &str) -> clap::error::Result<T> {
+fn flag_parser<T: bitflags::Flags>(s: &str) -> clap::error::Result<T> {
     bitflags::parser::from_str_strict(s)
         .map_err(|_| clap::Error::new(clap::error::ErrorKind::InvalidValue))
 }
@@ -142,7 +142,7 @@ impl User {
     }
 }
 
-static INIT_SQL: &str = include_str!("../../init.sql");
+static INIT_SQL: &str = include_str!("../../blahd/init.sql");
 
 fn main() -> Result<()> {
     let cli = <Cli as clap::Parser>::parse();

@@ -367,6 +367,7 @@ impl_serde_for_bitflags!(ServerPermission);
 impl_serde_for_bitflags!(MemberPermission);
 impl_serde_for_bitflags!(RoomAttrs);
 
+#[cfg(feature = "rusqlite")]
 mod sql_impl {
     use rusqlite::types::{FromSql, FromSqlError, FromSqlResult, ToSqlOutput, ValueRef};
     use rusqlite::{Result, ToSql};
