@@ -31,7 +31,9 @@ mod middleware;
 mod config;
 mod utils;
 
+/// Blah Chat Server
 #[derive(Debug, clap::Parser)]
+#[clap(about, version = option_env!("CFG_RELEASE").unwrap_or(env!("CARGO_PKG_VERSION")))]
 enum Cli {
     /// Run the server with given configuration.
     Serve {

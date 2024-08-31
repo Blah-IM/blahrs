@@ -1,0 +1,46 @@
+[Unit]
+Description=Blah Chat Server
+After=network.target
+
+[Service]
+Type=notify
+ExecStart=/usr/bin/blahd serve --config ${CONFIGURATION_DIRECTORY}/blahd.toml
+ConfigurationDirectory=blahd
+StateDirectory=blahd
+Restart=always
+RestartSec=10s
+
+# Permission and capabilities
+
+DynamicUser=yes
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+# 0640 / 0750
+UMask=0027
+
+# Sandboxing
+# Mostly copied from: https://github.com/NixOS/nixpkgs/blob/6414ef7ca3bf18ec4f9628d09ccc1eb030276ee2/nixos/modules/services/web-servers/nginx/default.nix#L1246
+
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+NoNewPrivileges=yes
+PrivateDevices=yes
+PrivateMounts=yes
+PrivateUsers=yes
+ProcSubset=pid
+ProtectClock=yes
+ProtectControlGroups=yes
+ProtectHome=yes
+ProtectHostname=yes
+ProtectHostname=yes
+ProtectKernelLogs=yes
+ProtectKernelModules=yes
+ProtectKernelTunables=yes
+ProtectProc=invisible
+ProtectProc=invisible
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictNamespaces=yes
+RestrictRealtime=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged

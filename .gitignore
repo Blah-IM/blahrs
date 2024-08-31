@@ -3,3 +3,5 @@
 *.key
 
 config.toml
+result
+result-*

@@ -11,9 +11,11 @@ pub struct Config {
     pub server: ServerConfig,
 }
 
+#[serde_inline_default]
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct DatabaseConfig {
+    #[serde_inline_default("/var/lib/blahd/db.sqlite".into())]
     pub path: PathBuf,
 }
 

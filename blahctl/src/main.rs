@@ -20,7 +20,9 @@ use tokio::runtime::Runtime;
 /// NB. Sync with docs of [`User::url`].
 const KEY_URL_SUBPATH: &str = "/.well-known/blah/key";
 
+/// Control or manage Blah Chat Server.
 #[derive(Debug, clap::Parser)]
+#[clap(about, version = option_env!("CFG_RELEASE").unwrap_or(env!("CARGO_PKG_VERSION")))]
 struct Cli {
     #[command(subcommand)]
     command: Command,

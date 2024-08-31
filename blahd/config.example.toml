@@ -1,8 +1,12 @@
+# The example configuration file, required options are documented as
+# `(Required)`, other options are optional and the example value given here is
+# the default value.
+
 [database]
-# (Required)
 # The path to the main SQLite database.
-# It will be created and initialized if not exist.
-path = "/path/to/db.sqlite"
+# The file will be created and initialized if not exist, but missing directory
+# will not.
+path = "/var/lib/blahd/db.sqlite"
 
 [server]
 
