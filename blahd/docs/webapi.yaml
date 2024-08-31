@@ -4,6 +4,23 @@ info:
   version: 0.0.1
 
 paths:
+  /room:
+    get:
+      summary: Get room metadata
+      responses:
+        200:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RoomMetadata'
+        404:
+          description: |
+            Room does not exist or the user does not have permission to get metadata of it.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+
   /room/create:
     post:
       summary: Create a new room
@@ -144,6 +161,36 @@ paths:
             application/json:
               $ref: '#/components/schemas/ApiError'
 
+  /room/{ruuid}/admin:
+    post:
+      summary: Room management
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: WithSig<ChatPayload>
+              example:
+                sig: 99a77e836538268839ed3419c649eefb043cb51d448f641cc2a1c523811aab4aacd09f92e7c0688ffd659bfc6acb764fea79979a491e132bf6a56dd23adc1d09
+                signee:
+                  nonce: 670593955
+                  payload:
+                    permission: 1
+                    room: 7ed9e067-ec37-4054-9fc2-b1bd890929bd
+                    typ: add_member
+                    user: 83ce46ced47ec0391c64846cbb6c507250ead4985b6a044d68751edc46015dd7
+                  timestamp: 1724966284
+                  user: 83ce46ced47ec0391c64846cbb6c507250ead4985b6a044d68751edc46015dd7
+      responses:
+        204:
+          description: Operation completed.
+        404:
+          description: |
+            Room does not exist or the user does not have permission for management.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+
 components:
   schemas:
     ApiError:
@@ -156,3 +203,11 @@ components:
               type: string
             message:
               type: string
+
+    RoomMetadata:
+      type: object
+      properties:
+        title:
+          type: string
+        attrs:
+          type: int64

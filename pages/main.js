@@ -3,6 +3,7 @@ const userPubkeyDisplay = document.querySelector('#user-pubkey');
 const roomUrlInput = document.querySelector('#room-url');
 const chatInput = document.querySelector('#chat');
 const regenKeyBtn = document.querySelector('#regen-key');
+const joinRoomBtn = document.querySelector('#join-room');
 
 let roomUrl = '';
 let roomUuid = null;
@@ -17,6 +18,11 @@ function bufToHex(buf) {
 
 function hexToBuf(hex) {
     return new Uint8Array(hex.match(/[\da-f]{2}/gi).map(m => parseInt(m, 16)))
+}
+
+async function getUserPubkey() {
+    if (keypair === null) throw new Error('no userkey');
+    return bufToHex(await crypto.subtle.exportKey('raw', keypair.publicKey));
 }
 
 function appendMsg(el) {
@@ -60,6 +66,7 @@ async function generateKeypair() {
     log('generating keypair');
     regenKeyBtn.disabled = true;
     chatInput.disabled = true;
+    joinRoomBtn.disabled = true;
     try {
         keypair = await crypto.subtle.generateKey('Ed25519', true, ['sign', 'verify']);
     } catch (e) {
@@ -79,6 +86,7 @@ async function generateKeypair() {
 
     regenKeyBtn.disabled = false;
     chatInput.disabled = false;
+    joinRoomBtn.disabled = false;
 
     try {
         const ser = (k) => crypto.subtle.exportKey('jwk', k);
@@ -94,7 +102,6 @@ async function generateKeypair() {
 
 async function showChatMsg(chat) {
     let verifyRet = null;
-    crypto.subtle.exportKey('raw', keypair.publicKey)
     try {
         const sortKeys = (obj) =>
             Object.fromEntries(Object.entries(obj).sort((lhs, rhs) => lhs[0] > rhs[0]));
@@ -217,8 +224,44 @@ async function connectRoom(url) {
     };
 }
 
+async function joinRoom() {
+    try {
+        joinRoomBtn.disabled = true;
+        await signAndPost(`${roomUrl}/admin`, {
+            // sorted fields.
+            permission: 1, // POST_CHAT
+            room: roomUuid,
+            typ: 'add_member',
+            user: await getUserPubkey(),
+        });
+        log('joined room');
+    } catch (e) {
+        console.error(e);
+        log(`failed to join room: ${e}`);
+    } finally {
+        joinRoomBtn.disabled = false;
+    }
+}
+
+async function signAndPost(url, data) {
+    const signedPayload = await signData(data);
+    const resp = await fetch(url, {
+        method: 'POST',
+        cache: 'no-cache',
+        body: signedPayload,
+        headers: {
+            'Content-Type': 'application/json',
+        },
+    });
+    if (!resp.ok) {
+        const errResp = await resp.json();
+        throw new Error(`status ${resp.status}: ${errResp.error.message}`);
+    }
+    return resp;
+}
+
 async function signData(payload) {
-    const userKey = bufToHex(await crypto.subtle.exportKey('raw', keypair.publicKey));
+    const userKey = await getUserPubkey();
     const nonceBuf = new Uint32Array(1);
     crypto.getRandomValues(nonceBuf);
     const timestamp = (Number(new Date()) / 1000) | 0;
@@ -248,24 +291,12 @@ async function postChat(text) {
         } else {
             richText = [text];
         }
-        const signedPayload = await signData({
+        await signAndPost(`${roomUrl}/item`, {
             // sorted fields.
             rich_text: richText,
             room: roomUuid,
             typ: 'chat',
         });
-        const resp = await fetch(`${roomUrl}/item`, {
-            method: 'POST',
-            cache: 'no-cache',
-            body: signedPayload,
-            headers: {
-                'Content-Type': 'application/json',
-            },
-        });
-        if (!resp.ok) {
-            const errResp = await resp.json();
-            throw new Error(`status ${resp.status}: ${errResp.error.message}`);
-        }
         chatInput.value = '';
     } catch (e) {
         console.error(e);
@@ -280,20 +311,21 @@ window.onload = async (_) => {
         await generateKeypair();
     }
     if (keypair !== null) {
-        userPubkeyDisplay.value = bufToHex(await crypto.subtle.exportKey('raw', keypair.publicKey));
+        userPubkeyDisplay.value = await getUserPubkey();
     }
-    connectRoom(roomUrlInput.value);
+    await connectRoom(roomUrlInput.value);
 };
-roomUrlInput.onchange = (e) => {
-    connectRoom(e.target.value);
+roomUrlInput.onchange = async (e) => {
+    await connectRoom(e.target.value);
 };
-chatInput.onkeypress = (e) => {
+chatInput.onkeypress = async (e) => {
     if (e.key === 'Enter') {
-        chatInput.disabled = true;
-        postChat(chatInput.value);
-        chatInput.disabled = false;
+        await postChat(chatInput.value);
     }
 };
-regenKeyBtn.onclick = (_) => {
-    generateKeypair();
+regenKeyBtn.onclick = async (_) => {
+    await generateKeypair();
+};
+joinRoomBtn.onclick = async (_) => {
+    await joinRoom();
 };

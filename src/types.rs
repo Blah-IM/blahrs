@@ -337,6 +337,14 @@ pub enum RoomAdminPayload {
     // TODO: CRUD
 }
 
+impl RoomAdminPayload {
+    pub fn room(&self) -> &Uuid {
+        match self {
+            RoomAdminPayload::AddMember { room, .. } => room,
+        }
+    }
+}
+
 bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub struct ServerPermission: u64 {
@@ -350,12 +358,15 @@ bitflags! {
         const POST_CHAT = 1 << 0;
         const ADD_MEMBER = 1 << 1;
 
+        const MAX_SELF_ADD = Self::POST_CHAT.bits();
+
         const ALL = !0;
     }
 
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
     pub struct RoomAttrs: u64 {
         const PUBLIC_READABLE = 1 << 0;
+        const PUBLIC_JOINABLE = 1 << 1;
 
         const _ = !0;
     }

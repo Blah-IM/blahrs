@@ -13,8 +13,8 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use axum_extra::extract::WithRejection;
 use blah::types::{
-    ChatItem, ChatPayload, CreateRoomPayload, MemberPermission, RoomAttrs, ServerPermission,
-    Signee, UserKey, WithSig,
+    ChatItem, ChatPayload, CreateRoomPayload, MemberPermission, RoomAdminPayload, RoomAttrs,
+    ServerPermission, Signee, UserKey, WithSig,
 };
 use config::Config;
 use ed25519_dalek::SIGNATURE_LENGTH;
@@ -153,10 +153,12 @@ async fn main_async(st: AppState) -> Result<()> {
 
     let app = Router::new()
         .route("/room/create", post(room_create))
+        .route("/room/:ruuid", get(room_get_metadata))
         // NB. Sync with `feed_url` and `next_url` generation.
         .route("/room/:ruuid/feed.json", get(room_get_feed))
         .route("/room/:ruuid/event", get(room_event))
         .route("/room/:ruuid/item", get(room_get_item).post(room_post_item))
+        .route("/room/:ruuid/admin", post(room_admin))
         .with_state(st.clone())
         // NB. This comes at last (outmost layer), so inner errors will still be wraped with
         // correct CORS headers.
@@ -269,6 +271,7 @@ struct GetRoomItemParams {
         deserialize_with = "serde_aux::field_attributes::deserialize_number_from_string"
     )]
     before_id: u64,
+    page_len: Option<usize>,
 }
 
 async fn room_get_item(
@@ -282,6 +285,23 @@ async fn room_get_item(
     // TODO: This format is to-be-decided. Or do we even need this interface other than
     // `feed.json`?
     Ok(Json((room_meta, items)))
+}
+
+async fn room_get_metadata(
+    st: ArcState,
+    WithRejection(Path(ruuid), _): WithRejection<Path<Uuid>, ApiError>,
+    OptionalAuth(user): OptionalAuth,
+) -> Result<Json<RoomMetadata>, ApiError> {
+    let (room_meta, _) = query_room_items(
+        &st,
+        ruuid,
+        user.as_ref(),
+        &GetRoomItemParams {
+            before_id: 0,
+            page_len: Some(0),
+        },
+    )?;
+    Ok(Json(room_meta))
 }
 
 async fn room_get_feed(
@@ -312,9 +332,14 @@ async fn room_get_feed(
         })
         .collect::<Vec<_>>();
 
+    let page_len = params
+        .page_len
+        .unwrap_or(st.config.server.max_page_len)
+        .min(st.config.server.max_page_len);
+
     let base_url = &st.config.server.base_url;
     let feed_url = format!("{base_url}/room/{ruuid}/feed.json");
-    let next_url = (items.len() == st.config.server.max_page_len).then(|| {
+    let next_url = (items.len() == page_len).then(|| {
         let last_id = &items.last().expect("page size is not 0").id;
         format!("{feed_url}?before_id={last_id}")
     });
@@ -418,6 +443,15 @@ fn query_room_items(
 
     let room_meta = RoomMetadata { title, attrs };
 
+    if params.page_len == Some(0) {
+        return Ok((room_meta, Vec::new()));
+    }
+
+    let page_len = params
+        .page_len
+        .unwrap_or(st.config.server.max_page_len)
+        .min(st.config.server.max_page_len);
+
     let mut stmt = conn.prepare(
         r"
         SELECT `cid`, `timestamp`, `nonce`, `sig`, `userkey`, `sig`, `rich_text`
@@ -434,7 +468,7 @@ fn query_room_items(
             named_params! {
                 ":rid": rid,
                 ":before_cid": params.before_id,
-                ":limit": st.config.server.max_page_len,
+                ":limit": page_len,
             },
             |row| {
                 let cid = row.get::<_, u64>("cid")?;
@@ -583,4 +617,87 @@ async fn room_event(
     let first_event = sse::Event::default().comment("");
     let stream = futures_util::stream::iter(Some(Ok(first_event))).chain(stream);
     Ok(sse::Sse::new(stream).keep_alive(sse::KeepAlive::default()))
+}
+
+async fn room_admin(
+    st: ArcState,
+    Path(ruuid): Path<Uuid>,
+    SignedJson(op): SignedJson<RoomAdminPayload>,
+) -> Result<StatusCode, ApiError> {
+    if ruuid != *op.signee.payload.room() {
+        return Err(error_response!(
+            StatusCode::BAD_REQUEST,
+            "invalid_request",
+            "URI and payload room id mismatch",
+        ));
+    }
+
+    let RoomAdminPayload::AddMember {
+        permission, user, ..
+    } = op.signee.payload;
+    if user != op.signee.user {
+        return Err(error_response!(
+            StatusCode::NOT_IMPLEMENTED,
+            "not_implemented",
+            "only self-adding is implemented yet",
+        ));
+    }
+    if permission.is_empty() || !MemberPermission::MAX_SELF_ADD.contains(permission) {
+        return Err(error_response!(
+            StatusCode::BAD_REQUEST,
+            "deserialization",
+            "invalid permission",
+        ));
+    }
+
+    let mut conn = st.conn.lock().unwrap();
+    let txn = conn.transaction()?;
+    let Some(rid) = txn
+        .query_row(
+            r"
+            SELECT `rid`
+            FROM `room`
+            WHERE `ruuid` = :ruuid AND
+                (`room`.`attrs` & :joinable) = :joinable
+            ",
+            named_params! {
+                ":ruuid": ruuid,
+                ":joinable": RoomAttrs::PUBLIC_JOINABLE,
+            },
+            |row| row.get::<_, u64>("rid"),
+        )
+        .optional()?
+    else {
+        return Err(error_response!(
+            StatusCode::FORBIDDEN,
+            "permission_denied",
+            "room does not exists or user is not allowed to join this room",
+        ));
+    };
+    txn.execute(
+        r"
+        INSERT INTO `user` (`userkey`)
+        VALUES (?)
+        ON CONFLICT (`userkey`) DO NOTHING
+        ",
+        params![user],
+    )?;
+    txn.execute(
+        r"
+        INSERT INTO `room_member` (`rid`, `uid`, `permission`)
+        SELECT :rid, `uid`, :perm
+        FROM `user`
+        WHERE `userkey` = :userkey
+        ON CONFLICT (`rid`, `uid`) DO UPDATE SET
+            `permission` = :perm
+        ",
+        named_params! {
+           ":rid": rid,
+           ":userkey": user,
+           ":perm": permission,
+        },
+    )?;
+    txn.commit()?;
+
+    Ok(StatusCode::NO_CONTENT)
 }
