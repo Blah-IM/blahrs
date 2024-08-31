@@ -26,11 +26,6 @@ use tokio_stream::StreamExt;
 use utils::ExpiringSet;
 use uuid::Uuid;
 
-const PAGE_LEN: usize = 64;
-const EVENT_QUEUE_LEN: usize = 1024;
-const MAX_BODY_LEN: usize = 4 << 10; // 4KiB
-const TIMESTAMP_TOLERENCE: u64 = 90;
-
 #[macro_use]
 mod middleware;
 mod config;
@@ -105,7 +100,9 @@ impl AppState {
         Ok(Self {
             conn: Mutex::new(conn),
             room_listeners: Mutex::new(HashMap::new()),
-            used_nonces: Mutex::new(ExpiringSet::new(Duration::from_secs(TIMESTAMP_TOLERENCE))),
+            used_nonces: Mutex::new(ExpiringSet::new(Duration::from_secs(
+                config.server.timestamp_tolerence_secs,
+            ))),
 
             config,
         })
@@ -124,7 +121,7 @@ impl AppState {
             .expect("after UNIX epoch")
             .as_secs()
             .abs_diff(data.signee.timestamp);
-        if timestamp_diff > TIMESTAMP_TOLERENCE {
+        if timestamp_diff > self.config.server.timestamp_tolerence_secs {
             return Err(error_response!(
                 StatusCode::BAD_REQUEST,
                 "invalid_timestamp",
@@ -161,7 +158,9 @@ async fn main_async(st: AppState) -> Result<()> {
         .with_state(st.clone())
         // NB. This comes at last (outmost layer), so inner errors will still be wraped with
         // correct CORS headers.
-        .layer(tower_http::limit::RequestBodyLimitLayer::new(MAX_BODY_LEN))
+        .layer(tower_http::limit::RequestBodyLimitLayer::new(
+            st.config.server.max_request_len,
+        ))
         .layer(tower_http::cors::CorsLayer::permissive());
 
     let listener = tokio::net::TcpListener::bind(&st.config.server.listen)
@@ -276,8 +275,7 @@ async fn room_get_item(
     WithRejection(params, _): WithRejection<Query<GetRoomItemParams>, ApiError>,
     OptionalAuth(user): OptionalAuth,
 ) -> Result<impl IntoResponse, ApiError> {
-    let (room_meta, items) =
-        query_room_items(&st.conn.lock().unwrap(), ruuid, user.as_ref(), &params)?;
+    let (room_meta, items) = query_room_items(&st, ruuid, user.as_ref(), &params)?;
 
     // TODO: This format is to-be-decided. Or do we even need this interface other than
     // `feed.json`?
@@ -289,7 +287,7 @@ async fn room_get_feed(
     WithRejection(Path(ruuid), _): WithRejection<Path<Uuid>, ApiError>,
     params: Query<GetRoomItemParams>,
 ) -> Result<impl IntoResponse, ApiError> {
-    let (room_meta, items) = query_room_items(&st.conn.lock().unwrap(), ruuid, None, &params)?;
+    let (room_meta, items) = query_room_items(&st, ruuid, None, &params)?;
 
     let items = items
         .into_iter()
@@ -314,7 +312,7 @@ async fn room_get_feed(
 
     let base_url = &st.config.server.base_url;
     let feed_url = format!("{base_url}/room/{ruuid}/feed.json");
-    let next_url = (items.len() == PAGE_LEN).then(|| {
+    let next_url = (items.len() == st.config.server.max_page_len).then(|| {
         let last_id = &items.last().expect("page size is not 0").id;
         format!("{feed_url}?before_id={last_id}")
     });
@@ -401,12 +399,14 @@ fn get_room_if_readable<T>(
 }
 
 fn query_room_items(
-    conn: &rusqlite::Connection,
+    st: &AppState,
     ruuid: Uuid,
     user: Option<&UserKey>,
     params: &GetRoomItemParams,
 ) -> Result<(RoomMetadata, Vec<(u64, ChatItem)>), ApiError> {
-    let (rid, title, attrs) = get_room_if_readable(conn, ruuid, user, |row| {
+    let conn = st.conn.lock().unwrap();
+
+    let (rid, title, attrs) = get_room_if_readable(&conn, ruuid, user, |row| {
         Ok((
             row.get::<_, u64>("rid")?,
             row.get::<_, String>("title")?,
@@ -432,7 +432,7 @@ fn query_room_items(
             named_params! {
                 ":rid": rid,
                 ":before_cid": params.before_id,
-                ":limit": PAGE_LEN,
+                ":limit": st.config.server.max_page_len,
             },
             |row| {
                 let cid = row.get::<_, u64>("cid")?;
@@ -543,7 +543,7 @@ async fn room_event(
     let rx = match st.room_listeners.lock().unwrap().entry(rid) {
         Entry::Occupied(ent) => ent.get().subscribe(),
         Entry::Vacant(ent) => {
-            let (tx, rx) = broadcast::channel(EVENT_QUEUE_LEN);
+            let (tx, rx) = broadcast::channel(st.config.server.event_queue_len);
             ent.insert(tx);
             rx
         }

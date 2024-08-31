@@ -2,6 +2,7 @@ use std::path::PathBuf;
 
 use anyhow::{ensure, Result};
 use serde::Deserialize;
+use serde_inline_default::serde_inline_default;
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -16,11 +17,22 @@ pub struct DatabaseConfig {
     pub path: PathBuf,
 }
 
+#[serde_inline_default]
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ServerConfig {
     pub listen: String,
     pub base_url: String,
+
+    #[serde_inline_default(1024)]
+    pub max_page_len: usize,
+    #[serde_inline_default(4096)] // 4KiB
+    pub max_request_len: usize,
+    #[serde_inline_default(1024)]
+    pub event_queue_len: usize,
+
+    #[serde_inline_default(90)]
+    pub timestamp_tolerence_secs: u64,
 }
 
 impl Config {

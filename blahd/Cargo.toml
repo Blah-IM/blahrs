@@ -26,3 +26,4 @@ uuid = { version = "1", features = ["v4"] }
 
 blah = { path = "..", features = ["rusqlite"] }
 basic-toml = "0.1.9"
+serde-inline-default = "0.2.0"

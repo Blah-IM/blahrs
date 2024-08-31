@@ -1,13 +1,29 @@
 [database]
+# (Required)
 # The path to the main SQLite database.
 # It will be created and initialized if not exist.
 path = "/path/to/db.sqlite"
 
 [server]
 
+# (Required)
 # The socket address to listen on.
 listen = "localhost:8080"
 
+# (Required)
 # The global absolute URL prefix where this service is hosted.
 # It is for link generation and must not have trailing slash.
 base_url = "http://localhost:8080"
+
+# Maximum number of items in a single response, eg. get chat items.
+# More items will be paged.
+max_page_len = 1024
+
+# Maximum request body length in bytes.
+max_request_len = 4096
+
+# Maximum length of a single event queue.
+event_queue_len = 1024
+
+# The maximum timestamp tolerence in seconds for request validation.
+timestamp_tolerence_secs = 90
