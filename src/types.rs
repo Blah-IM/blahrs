@@ -1,7 +1,3 @@
-//! NB. All structs here that are part of signee must be lexically sorted, as RFC8785.
-//! This is tested by `canonical_fields_sorted`.
-//! See: https://www.rfc-editor.org/rfc/rfc8785
-//! FIXME: `typ` is still always the first field because of `serde`'s implementation.
 use std::fmt;
 use std::time::SystemTime;
 
@@ -44,7 +40,7 @@ pub struct Signee<T> {
     pub user: UserKey,
 }
 
-fn get_timestamp() -> u64 {
+pub fn get_timestamp() -> u64 {
     SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
         .expect("after UNIX epoch")
@@ -55,16 +51,17 @@ impl<T: Serialize> WithSig<T> {
     /// Sign the payload with the given `key`.
     pub fn sign(
         key: &SigningKey,
+        timestamp: u64,
         rng: &mut impl RngCore,
         payload: T,
     ) -> Result<Self, SignatureError> {
         let signee = Signee {
             nonce: rng.next_u32(),
             payload,
-            timestamp: get_timestamp(),
+            timestamp,
             user: UserKey(key.verifying_key().to_bytes()),
         };
-        let canonical_signee = serde_json::to_vec(&signee).expect("serialization cannot fail");
+        let canonical_signee = serde_jcs::to_vec(&signee).expect("serialization cannot fail");
         let sig = key.try_sign(&canonical_signee)?.to_bytes();
         Ok(Self { sig, signee })
     }
@@ -73,7 +70,7 @@ impl<T: Serialize> WithSig<T> {
     ///
     /// Note that this does nott check validity of timestamp and other data.
     pub fn verify(&self) -> Result<(), SignatureError> {
-        let canonical_signee = serde_json::to_vec(&self.signee).expect("serialization cannot fail");
+        let canonical_signee = serde_jcs::to_vec(&self.signee).expect("serialization cannot fail");
         let sig = Signature::from_bytes(&self.sig);
         VerifyingKey::from_bytes(&self.signee.user.0)?.verify_strict(&canonical_signee, &sig)?;
         Ok(())
@@ -431,49 +428,32 @@ mod sql_impl {
 
 #[cfg(test)]
 mod tests {
-    use std::fmt::Write;
-
-    use syn::visit;
-
     use super::*;
 
-    #[derive(Default)]
-    struct Visitor {
-        errors: String,
-    }
-
-    const SKIP_CHECK_STRUCTS: &[&str] = &["RichTextPiece", "RichTextPieceRaw"];
-
-    impl<'ast> syn::visit::Visit<'ast> for Visitor {
-        fn visit_fields_named(&mut self, i: &'ast syn::FieldsNamed) {
-            let fields = i
-                .named
-                .iter()
-                .flat_map(|f| f.ident.clone())
-                .map(|i| i.to_string())
-                .collect::<Vec<_>>();
-            if !fields.windows(2).all(|w| w[0] < w[1]) {
-                writeln!(self.errors, "unsorted fields: {fields:?}").unwrap();
-            }
-        }
-
-        fn visit_item_struct(&mut self, i: &'ast syn::ItemStruct) {
-            if !SKIP_CHECK_STRUCTS.contains(&&*i.ident.to_string()) {
-                visit::visit_item_struct(self, i);
-            }
-        }
-    }
-
     #[test]
-    fn canonical_fields_sorted() {
-        let src = std::fs::read_to_string(file!()).unwrap();
-        let file = syn::parse_file(&src).unwrap();
+    fn canonical_chat() {
+        let mut fake_rng = rand::rngs::mock::StepRng::new(0x42, 1);
+        let signing_key = SigningKey::from_bytes(&[0x42; 32]);
+        let timestamp = 0xDEAD_BEEF;
+        let item = WithSig::sign(
+            &signing_key,
+            timestamp,
+            &mut fake_rng,
+            ChatPayload {
+                rich_text: RichText::from("hello"),
+                room: Uuid::nil(),
+            },
+        )
+        .unwrap();
 
-        let mut v = Visitor::default();
-        syn::visit::visit_file(&mut v, &file);
-        if !v.errors.is_empty() {
-            panic!("{}", v.errors);
-        }
+        let json = serde_jcs::to_string(&item).unwrap();
+        assert_eq!(
+            json,
+            r#"{"sig":"5e52985dc9e43a77267f0b383a8223af96f36e83c180a36da627dfac6504b2bb4c6b80c9903a6c3a0bbc742718466d72af4407a8e74d41af5cb0137cf3798d08","signee":{"nonce":66,"payload":{"rich_text":["hello"],"room":"00000000-0000-0000-0000-000000000000","typ":"chat"},"timestamp":3735928559,"user":"2152f8d19b791d24453242e15f2eab6cb7cffa7b6a5ed30097960e069881db12"}}"#
+        );
+        let roundtrip_item = serde_json::from_str::<WithSig<ChatPayload>>(&json).unwrap();
+        // assert_eq!(roundtrip_item, item);
+        roundtrip_item.verify().unwrap();
     }
 
     #[test]

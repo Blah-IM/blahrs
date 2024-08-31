@@ -5,8 +5,8 @@ use std::{fs, io};
 use anyhow::{Context, Result};
 use blah::bitflags;
 use blah::types::{
-    ChatPayload, CreateRoomPayload, MemberPermission, RichText, RoomAttrs, RoomMember,
-    RoomMemberList, ServerPermission, UserKey, WithSig,
+    get_timestamp, ChatPayload, CreateRoomPayload, MemberPermission, RichText, RoomAttrs,
+    RoomMember, RoomMemberList, ServerPermission, UserKey, WithSig,
 };
 use blah::uuid::Uuid;
 use ed25519_dalek::pkcs8::spki::der::pem::LineEnding;
@@ -220,7 +220,7 @@ async fn main_api(api_url: Url, command: ApiCommand) -> Result<()> {
                     user: UserKey(key.verifying_key().to_bytes()),
                 }]),
             };
-            let payload = WithSig::sign(&key, &mut OsRng, payload)?;
+            let payload = WithSig::sign(&key, get_timestamp(), &mut OsRng, payload)?;
 
             let ret = client
                 .post(api_url.join("/room/create")?)
@@ -242,7 +242,7 @@ async fn main_api(api_url: Url, command: ApiCommand) -> Result<()> {
                 room,
                 rich_text: RichText::from(text),
             };
-            let payload = WithSig::sign(&key, &mut OsRng, payload)?;
+            let payload = WithSig::sign(&key, get_timestamp(), &mut OsRng, payload)?;
 
             let ret = client
                 .post(api_url.join(&format!("/room/{room}/item"))?)

@@ -96,7 +96,12 @@ async function showChatMsg(chat) {
     let verifyRet = null;
     crypto.subtle.exportKey('raw', keypair.publicKey)
     try {
-        const signeeBytes = (new TextEncoder()).encode(JSON.stringify(chat.signee));
+        const sortKeys = (obj) =>
+            Object.fromEntries(Object.entries(obj).sort((lhs, rhs) => lhs[0] > rhs[0]));
+        const canonicalJson = chat.signee
+        // Just for simplicity. Only this struct is unsorted due to serde implementation.
+        canonicalJson.payload = sortKeys(canonicalJson.payload)
+        const signeeBytes = (new TextEncoder()).encode(JSON.stringify(canonicalJson));
         const rawkey = hexToBuf(chat.signee.user);
         const senderKey = await crypto.subtle.importKey('raw', rawkey, { name: 'Ed25519' }, true, ['verify']);
         const success = await crypto.subtle.verify('Ed25519', senderKey, hexToBuf(chat.sig), signeeBytes);
@@ -244,9 +249,10 @@ async function postChat(text) {
             richText = [text];
         }
         const signedPayload = await signData({
-            typ: 'chat',
+            // sorted fields.
             rich_text: richText,
             room: roomUuid,
+            typ: 'chat',
         });
         const resp = await fetch(`${roomUrl}/item`, {
             method: 'POST',
