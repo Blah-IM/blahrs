@@ -177,12 +177,12 @@ async function connectRoom(url) {
             },
         },
     )
-    .then((resp) => {
-        if (!resp.ok) throw new Error(`status ${resp.status} ${resp.statusText}`);
-        return resp.json();
+    .then(async (resp) => {
+        return [resp.status, await resp.json()];
     })
     // TODO: This response format is to-be-decided.
-    .then(async (json) => {
+    .then(async ([status, json]) => {
+        if (status !== 200) throw new Error(`status ${status}: ${json.error.message}`);
         const [{ title }, items] = json
         document.title = `room: ${title}`
         items.reverse();
@@ -256,7 +256,10 @@ async function postChat(text) {
                 'Content-Type': 'application/json',
             },
         });
-        if (!resp.ok) throw new Error(`status ${resp.status} ${resp.statusText}`);
+        if (!resp.ok) {
+            const errResp = await resp.json();
+            throw new Error(`status ${resp.status}: ${errResp.error.message}`);
+        }
         chatInput.value = '';
     } catch (e) {
         console.error(e);

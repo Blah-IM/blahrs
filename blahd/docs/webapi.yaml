@@ -33,6 +33,9 @@ paths:
               description: UUID of the newly created room (ruuid).
         403:
           description: The user does not have permission to create room.
+          content:
+            application/json:
+              $ref: '#/components/schemas/ApiError'
 
   /room/{ruuid}/feed.json:
     get:
@@ -45,6 +48,9 @@ paths:
               $ref: 'https://www.jsonfeed.org/version/1.1/'
         404:
           description: Room does not exist or is private.
+          content:
+            application/json:
+              $ref: '#/components/schemas/ApiError'
 
   /room/{ruuid}/item:
     get:
@@ -68,6 +74,12 @@ paths:
           content:
             application/json:
               x-description: TODO
+        404:
+          description: |
+            Room does not exist or the user does not have permission to read it.
+          content:
+            application/json:
+              $ref: '#/components/schemas/ApiError'
 
     post:
       summary: Post a chat in room {ruuid}
@@ -94,10 +106,15 @@ paths:
               description: Created chat id (cid).
         400:
           description: Body is invalid or fails the verification.
+          content:
+            application/json:
+              $ref: '#/components/schemas/ApiError'
         403:
-          description: The user does not have permission to post in this room.
-        404:
-          description: Room not found.
+          description: |
+            The user does not have permission to post in this room, or the room does not exist.
+          content:
+            application/json:
+              $ref: '#/components/schemas/ApiError'
 
   /room/{ruuid}/event:
     get:
@@ -118,5 +135,24 @@ paths:
               x-description: An event stream, each event is a JSON with type WithSig<ChatPayload>
         400:
           description: Body is invalid or fails the verification.
+          content:
+            application/json:
+              $ref: '#/components/schemas/ApiError'
         404:
           description: Room not found.
+          content:
+            application/json:
+              $ref: '#/components/schemas/ApiError'
+
+components:
+  schemas:
+    ApiError:
+      type: object
+      properties:
+        error:
+          type: object
+          properties:
+            code:
+              type: string
+            message:
+              type: string

@@ -6,18 +6,19 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
 
 use anyhow::{ensure, Context, Result};
-use axum::extract::{FromRef, FromRequest, FromRequestParts, Path, Query, Request, State};
-use axum::http::{header, request, StatusCode};
-use axum::response::{sse, IntoResponse, Response};
+use axum::extract::{Path, Query, State};
+use axum::http::{header, StatusCode};
+use axum::response::{sse, IntoResponse};
 use axum::routing::{get, post};
-use axum::{async_trait, Json, Router};
+use axum::{Json, Router};
+use axum_extra::extract::WithRejection;
 use blah::types::{
-    AuthPayload, ChatItem, ChatPayload, CreateRoomPayload, MemberPermission, RoomAttrs,
-    ServerPermission, Signee, UserKey, WithSig,
+    ChatItem, ChatPayload, CreateRoomPayload, MemberPermission, RoomAttrs, ServerPermission,
+    Signee, UserKey, WithSig,
 };
 use ed25519_dalek::SIGNATURE_LENGTH;
+use middleware::{ApiError, OptionalAuth, SignedJson};
 use rusqlite::{named_params, params, OptionalExtension, Row};
-use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use tokio::sync::broadcast;
 use tokio_stream::StreamExt;
@@ -29,6 +30,8 @@ const EVENT_QUEUE_LEN: usize = 1024;
 const MAX_BODY_LEN: usize = 4 << 10; // 4KiB
 const TIMESTAMP_TOLERENCE: u64 = 90;
 
+#[macro_use]
+mod middleware;
 mod utils;
 
 #[derive(Debug, clap::Parser)]
@@ -93,24 +96,38 @@ impl AppState {
         })
     }
 
-    fn verify_signed_data<T: Serialize>(&self, data: &WithSig<T>) -> Result<()> {
-        data.verify().context("unsigned payload")?;
+    fn verify_signed_data<T: Serialize>(&self, data: &WithSig<T>) -> Result<(), ApiError> {
+        let Ok(()) = data.verify() else {
+            return Err(error_response!(
+                StatusCode::BAD_REQUEST,
+                "invalid_signature",
+                "signature verification failed"
+            ));
+        };
         let timestamp_diff = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
             .expect("after UNIX epoch")
             .as_secs()
             .abs_diff(data.signee.timestamp);
-        ensure!(
-            timestamp_diff <= TIMESTAMP_TOLERENCE,
-            "invalid timestamp, off by {timestamp_diff}s"
-        );
-        ensure!(
-            self.used_nonces
-                .lock()
-                .unwrap()
-                .try_insert(data.signee.nonce),
-            "duplicated nonce",
-        );
+        if timestamp_diff > TIMESTAMP_TOLERENCE {
+            return Err(error_response!(
+                StatusCode::BAD_REQUEST,
+                "invalid_timestamp",
+                "invalid timestamp, off by {timestamp_diff}s"
+            ));
+        }
+        if !self
+            .used_nonces
+            .lock()
+            .unwrap()
+            .try_insert(data.signee.nonce)
+        {
+            return Err(error_response!(
+                StatusCode::BAD_REQUEST,
+                "duplicated_nonce",
+                "duplicated nonce",
+            ));
+        }
         Ok(())
     }
 }
@@ -125,9 +142,9 @@ async fn main_async(opt: Cli, st: AppState) -> Result<()> {
         .route("/room/:ruuid/event", get(room_event))
         .route("/room/:ruuid/item", get(room_get_item).post(room_post_item))
         .with_state(Arc::new(st))
-        .layer(tower_http::limit::RequestBodyLimitLayer::new(MAX_BODY_LEN))
         // NB. This comes at last (outmost layer), so inner errors will still be wraped with
         // correct CORS headers.
+        .layer(tower_http::limit::RequestBodyLimitLayer::new(MAX_BODY_LEN))
         .layer(tower_http::cors::CorsLayer::permissive());
 
     let listener = tokio::net::TcpListener::bind(&opt.listen)
@@ -143,26 +160,20 @@ async fn main_async(opt: Cli, st: AppState) -> Result<()> {
     Ok(())
 }
 
-fn from_db_error(err: rusqlite::Error) -> StatusCode {
-    match err {
-        rusqlite::Error::QueryReturnedNoRows => StatusCode::NOT_FOUND,
-        err => {
-            tracing::error!(%err, "database error");
-            StatusCode::INTERNAL_SERVER_ERROR
-        }
-    }
-}
-
 async fn room_create(
     st: ArcState,
     SignedJson(params): SignedJson<CreateRoomPayload>,
-) -> Result<Json<Uuid>, StatusCode> {
+) -> Result<Json<Uuid>, ApiError> {
     let members = &params.signee.payload.members.0;
     if !members
         .iter()
         .any(|m| m.user == params.signee.user && m.permission == MemberPermission::ALL)
     {
-        return Err(StatusCode::BAD_REQUEST);
+        return Err(error_response!(
+            StatusCode::BAD_REQUEST,
+            "deserialization",
+            "invalid initial members",
+        ));
     }
 
     let mut conn = st.conn.lock().unwrap();
@@ -179,57 +190,56 @@ async fn room_create(
                 Ok(perm.contains(ServerPermission::CREATE_ROOM))
             },
         )
-        .optional()
-        .map_err(from_db_error)?
+        .optional()?
     else {
-        return Err(StatusCode::FORBIDDEN);
+        return Err(error_response!(
+            StatusCode::FORBIDDEN,
+            "permission_denied",
+            "user does not have permission to create room",
+        ));
     };
 
     let ruuid = Uuid::new_v4();
 
-    (|| {
-        let txn = conn.transaction()?;
-        let rid = txn.query_row(
-            r"
-            INSERT INTO `room` (`ruuid`, `title`)
-            VALUES (:ruuid, :title)
-            RETURNING `rid`
-            ",
-            named_params! {
-                ":ruuid": ruuid,
-                ":title": params.signee.payload.title,
-            },
-            |row| row.get::<_, u64>(0),
-        )?;
-        let mut insert_user = txn.prepare(
-            r"
-            INSERT INTO `user` (`userkey`)
-            VALUES (?)
-            ON CONFLICT (`userkey`) DO NOTHING
-            ",
-        )?;
-        let mut insert_member = txn.prepare(
-            r"
-            INSERT INTO `room_member` (`rid`, `uid`, `permission`)
-            SELECT :rid, `uid`, :permission
-            FROM `user`
-            WHERE `userkey` = :userkey
-            ",
-        )?;
-        for member in members {
-            insert_user.execute(params![member.user])?;
-            insert_member.execute(named_params! {
-                ":rid": rid,
-                ":userkey": member.user,
-                ":permission": member.permission,
-            })?;
-        }
-        drop(insert_member);
-        drop(insert_user);
-        txn.commit()?;
-        Ok(())
-    })()
-    .map_err(from_db_error)?;
+    let txn = conn.transaction()?;
+    let rid = txn.query_row(
+        r"
+        INSERT INTO `room` (`ruuid`, `title`)
+        VALUES (:ruuid, :title)
+        RETURNING `rid`
+        ",
+        named_params! {
+            ":ruuid": ruuid,
+            ":title": params.signee.payload.title,
+        },
+        |row| row.get::<_, u64>(0),
+    )?;
+    let mut insert_user = txn.prepare(
+        r"
+        INSERT INTO `user` (`userkey`)
+        VALUES (?)
+        ON CONFLICT (`userkey`) DO NOTHING
+        ",
+    )?;
+    let mut insert_member = txn.prepare(
+        r"
+        INSERT INTO `room_member` (`rid`, `uid`, `permission`)
+        SELECT :rid, `uid`, :permission
+        FROM `user`
+        WHERE `userkey` = :userkey
+        ",
+    )?;
+    for member in members {
+        insert_user.execute(params![member.user])?;
+        insert_member.execute(named_params! {
+            ":rid": rid,
+            ":userkey": member.user,
+            ":permission": member.permission,
+        })?;
+    }
+    drop(insert_member);
+    drop(insert_user);
+    txn.commit()?;
 
     Ok(Json(ruuid))
 }
@@ -246,13 +256,12 @@ struct GetRoomItemParams {
 
 async fn room_get_item(
     st: ArcState,
-    Path(ruuid): Path<Uuid>,
-    params: Query<GetRoomItemParams>,
+    WithRejection(Path(ruuid), _): WithRejection<Path<Uuid>, ApiError>,
+    WithRejection(params, _): WithRejection<Query<GetRoomItemParams>, ApiError>,
     OptionalAuth(user): OptionalAuth,
-) -> Result<impl IntoResponse, StatusCode> {
+) -> Result<impl IntoResponse, ApiError> {
     let (room_meta, items) =
-        query_room_items(&st.conn.lock().unwrap(), ruuid, user.as_ref(), &params)
-            .map_err(from_db_error)?;
+        query_room_items(&st.conn.lock().unwrap(), ruuid, user.as_ref(), &params)?;
 
     // TODO: This format is to-be-decided. Or do we even need this interface other than
     // `feed.json`?
@@ -261,11 +270,10 @@ async fn room_get_item(
 
 async fn room_get_feed(
     st: ArcState,
-    Path(ruuid): Path<Uuid>,
+    WithRejection(Path(ruuid), _): WithRejection<Path<Uuid>, ApiError>,
     params: Query<GetRoomItemParams>,
-) -> Result<impl IntoResponse, StatusCode> {
-    let (room_meta, items) =
-        query_room_items(&st.conn.lock().unwrap(), ruuid, None, &params).map_err(from_db_error)?;
+) -> Result<impl IntoResponse, ApiError> {
+    let (room_meta, items) = query_room_items(&st.conn.lock().unwrap(), ruuid, None, &params)?;
 
     let items = items
         .into_iter()
@@ -352,7 +360,7 @@ fn get_room_if_readable<T>(
     ruuid: Uuid,
     user: Option<&UserKey>,
     f: impl FnOnce(&Row<'_>) -> rusqlite::Result<T>,
-) -> rusqlite::Result<T> {
+) -> Result<T, ApiError> {
     conn.query_row(
         r"
         SELECT `rid`, `title`, `attrs`
@@ -372,6 +380,8 @@ fn get_room_if_readable<T>(
         },
         f,
     )
+    .optional()?
+    .ok_or_else(|| error_response!(StatusCode::NOT_FOUND, "not_found", "room not found"))
 }
 
 fn query_room_items(
@@ -379,7 +389,7 @@ fn query_room_items(
     ruuid: Uuid,
     user: Option<&UserKey>,
     params: &GetRoomItemParams,
-) -> rusqlite::Result<(RoomMetadata, Vec<(u64, ChatItem)>)> {
+) -> Result<(RoomMetadata, Vec<(u64, ChatItem)>), ApiError> {
     let (rid, title, attrs) = get_room_if_readable(conn, ruuid, user, |row| {
         Ok((
             row.get::<_, u64>("rid")?,
@@ -430,76 +440,17 @@ fn query_room_items(
     Ok((room_meta, items))
 }
 
-/// Extractor for verified JSON payload.
-#[derive(Debug)]
-struct SignedJson<T>(WithSig<T>);
-
-#[async_trait]
-impl<S, T> FromRequest<S> for SignedJson<T>
-where
-    S: Send + Sync,
-    T: Serialize + DeserializeOwned,
-    Arc<AppState>: FromRef<S>,
-{
-    type Rejection = Response;
-
-    async fn from_request(req: Request, state: &S) -> Result<Self, Self::Rejection> {
-        let Json(data) = <Json<WithSig<T>> as FromRequest<S>>::from_request(req, state)
-            .await
-            .map_err(|err| err.into_response())?;
-        let st = <Arc<AppState>>::from_ref(state);
-        st.verify_signed_data(&data).map_err(|err| {
-            tracing::debug!(%err, "unsigned payload");
-            StatusCode::BAD_REQUEST.into_response()
-        })?;
-        Ok(Self(data))
-    }
-}
-
-/// Extractor for optional verified JSON authorization header.
-#[derive(Debug)]
-struct OptionalAuth(Option<UserKey>);
-
-#[async_trait]
-impl<S> FromRequestParts<S> for OptionalAuth
-where
-    S: Send + Sync,
-    Arc<AppState>: FromRef<S>,
-{
-    type Rejection = StatusCode;
-
-    async fn from_request_parts(
-        parts: &mut request::Parts,
-        state: &S,
-    ) -> Result<Self, Self::Rejection> {
-        let Some(auth) = parts.headers.get(header::AUTHORIZATION) else {
-            return Ok(Self(None));
-        };
-
-        let st = <Arc<AppState>>::from_ref(state);
-        let ret = serde_json::from_slice::<WithSig<AuthPayload>>(auth.as_bytes())
-            .context("invalid JSON")
-            .and_then(|data| {
-                st.verify_signed_data(&data)?;
-                Ok(data.signee.user)
-            });
-        match ret {
-            Ok(user) => Ok(Self(Some(user))),
-            Err(err) => {
-                tracing::debug!(%err, "invalid authorization");
-                Err(StatusCode::BAD_REQUEST)
-            }
-        }
-    }
-}
-
 async fn room_post_item(
     st: ArcState,
     Path(ruuid): Path<Uuid>,
     SignedJson(chat): SignedJson<ChatPayload>,
-) -> Result<Json<u64>, StatusCode> {
+) -> Result<Json<u64>, ApiError> {
     if ruuid != chat.signee.payload.room {
-        return Err(StatusCode::BAD_REQUEST);
+        return Err(error_response!(
+            StatusCode::BAD_REQUEST,
+            "invalid_request",
+            "URI and payload room id mismatch",
+        ));
     }
 
     let (rid, cid) = {
@@ -522,41 +473,39 @@ async fn room_post_item(
                 },
                 |row| Ok((row.get::<_, u64>("rid")?, row.get::<_, u64>("uid")?)),
             )
-            .optional()
-            .map_err(from_db_error)?
+            .optional()?
         else {
-            tracing::debug!("rejected post: unpermitted user {}", chat.signee.user);
-            return Err(StatusCode::FORBIDDEN);
+            return Err(error_response!(
+                StatusCode::FORBIDDEN,
+                "permission_denied",
+                "the user does not have permission to post in this room",
+            ));
         };
 
-        let cid = conn
-            .query_row(
-                r"
-                INSERT INTO `room_item` (`rid`, `uid`, `timestamp`, `nonce`, `sig`, `rich_text`)
-                VALUES (:rid, :uid, :timestamp, :nonce, :sig, :rich_text)
-                RETURNING `cid`
-                ",
-                named_params! {
-                    ":rid": rid,
-                    ":uid": uid,
-                    ":timestamp": chat.signee.timestamp,
-                    ":nonce": chat.signee.nonce,
-                    ":rich_text": &chat.signee.payload.rich_text,
-                    ":sig": chat.sig,
-                },
-                |row| row.get::<_, u64>(0),
-            )
-            .map_err(from_db_error)?;
+        let cid = conn.query_row(
+            r"
+            INSERT INTO `room_item` (`rid`, `uid`, `timestamp`, `nonce`, `sig`, `rich_text`)
+            VALUES (:rid, :uid, :timestamp, :nonce, :sig, :rich_text)
+            RETURNING `cid`
+            ",
+            named_params! {
+                ":rid": rid,
+                ":uid": uid,
+                ":timestamp": chat.signee.timestamp,
+                ":nonce": chat.signee.nonce,
+                ":rich_text": &chat.signee.payload.rich_text,
+                ":sig": chat.sig,
+            },
+            |row| row.get::<_, u64>(0),
+        )?;
         (rid, cid)
     };
 
-    {
-        let mut listeners = st.room_listeners.lock().unwrap();
-        if let Some(tx) = listeners.get(&rid) {
-            if tx.send(Arc::new(chat)).is_err() {
-                // Clean up because all receivers died.
-                listeners.remove(&rid);
-            }
+    let mut listeners = st.room_listeners.lock().unwrap();
+    if let Some(tx) = listeners.get(&rid) {
+        if tx.send(Arc::new(chat)).is_err() {
+            // Clean up because all receivers died.
+            listeners.remove(&rid);
         }
     }
 
@@ -570,11 +519,10 @@ async fn room_event(
     // But this API is kinda temporary and need a better replacement anyway.
     // So just only support public room for now.
     OptionalAuth(user): OptionalAuth,
-) -> Result<impl IntoResponse, StatusCode> {
+) -> Result<impl IntoResponse, ApiError> {
     let rid = get_room_if_readable(&st.conn.lock().unwrap(), ruuid, user.as_ref(), |row| {
         row.get::<_, u64>(0)
-    })
-    .map_err(from_db_error)?;
+    })?;
 
     let rx = match st.room_listeners.lock().unwrap().entry(rid) {
         Entry::Occupied(ent) => ent.get().subscribe(),

@@ -6,6 +6,7 @@ edition = "2021"
 [dependencies]
 anyhow = "1"
 axum = { version = "0.7", features = ["tokio"] }
+axum-extra = "0.9"
 clap = { version = "4", features = ["derive"] }
 ed25519-dalek = "2"
 futures-util = "0.3"
