@@ -1,3 +1,5 @@
 /target
 *.sqlite*
 *.key
+
+config.toml

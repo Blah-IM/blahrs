@@ -1,0 +1,13 @@
+[database]
+# The path to the main SQLite database.
+# It will be created and initialized if not exist.
+path = "/path/to/db.sqlite"
+
+[server]
+
+# The socket address to listen on.
+listen = "localhost:8080"
+
+# The global absolute URL prefix where this service is hosted.
+# It is for link generation and must not have trailing slash.
+base_url = "http://localhost:8080"
