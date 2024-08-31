@@ -5,17 +5,15 @@
 use std::fmt;
 use std::time::SystemTime;
 
-use anyhow::{ensure, Context};
 use bitflags::bitflags;
 use bitflags_serde_shim::impl_serde_for_bitflags;
 use ed25519_dalek::{
-    Signature, Signer, SigningKey, VerifyingKey, PUBLIC_KEY_LENGTH, SIGNATURE_LENGTH,
+    Signature, SignatureError, Signer, SigningKey, VerifyingKey, PUBLIC_KEY_LENGTH,
+    SIGNATURE_LENGTH,
 };
 use rand_core::RngCore;
 use serde::{de, Deserialize, Deserializer, Serialize, Serializer};
 use uuid::Uuid;
-
-const TIMESTAMP_TOLERENCE: u64 = 90;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(transparent)]
@@ -54,25 +52,28 @@ fn get_timestamp() -> u64 {
 }
 
 impl<T: Serialize> WithSig<T> {
-    pub fn sign(key: &SigningKey, rng: &mut impl RngCore, payload: T) -> anyhow::Result<Self> {
+    /// Sign the payload with the given `key`.
+    pub fn sign(
+        key: &SigningKey,
+        rng: &mut impl RngCore,
+        payload: T,
+    ) -> Result<Self, SignatureError> {
         let signee = Signee {
             nonce: rng.next_u32(),
             payload,
             timestamp: get_timestamp(),
             user: UserKey(key.verifying_key().to_bytes()),
         };
-        let canonical_signee = serde_json::to_vec(&signee).context("failed to serialize")?;
+        let canonical_signee = serde_json::to_vec(&signee).expect("serialization cannot fail");
         let sig = key.try_sign(&canonical_signee)?.to_bytes();
         Ok(Self { sig, signee })
     }
 
-    pub fn verify(&self) -> anyhow::Result<()> {
-        ensure!(
-            self.signee.timestamp.abs_diff(get_timestamp()) < TIMESTAMP_TOLERENCE,
-            "invalid timestamp"
-        );
-
-        let canonical_signee = serde_json::to_vec(&self.signee).context("failed to serialize")?;
+    /// Verify `sig` is valid for `signee`.
+    ///
+    /// Note that this does nott check validity of timestamp and other data.
+    pub fn verify(&self) -> Result<(), SignatureError> {
+        let canonical_signee = serde_json::to_vec(&self.signee).expect("serialization cannot fail");
         let sig = Signature::from_bytes(&self.sig);
         VerifyingKey::from_bytes(&self.signee.user.0)?.verify_strict(&canonical_signee, &sig)?;
         Ok(())

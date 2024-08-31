@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
 
 use anyhow::{ensure, Context, Result};
-use axum::extract::{FromRequest, FromRequestParts, Path, Query, Request, State};
+use axum::extract::{FromRef, FromRequest, FromRequestParts, Path, Query, Request, State};
 use axum::http::{header, request, StatusCode};
 use axum::response::{sse, IntoResponse, Response};
 use axum::routing::{get, post};
@@ -21,11 +21,15 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use tokio::sync::broadcast;
 use tokio_stream::StreamExt;
+use utils::ExpiringSet;
 use uuid::Uuid;
 
 const PAGE_LEN: usize = 64;
 const EVENT_QUEUE_LEN: usize = 1024;
 const MAX_BODY_LEN: usize = 4 << 10; // 4KiB
+const TIMESTAMP_TOLERENCE: u64 = 90;
+
+mod utils;
 
 #[derive(Debug, clap::Parser)]
 struct Cli {
@@ -58,10 +62,12 @@ fn main() -> Result<()> {
     Ok(())
 }
 
+// Locks must be grabbed in the field order.
 #[derive(Debug)]
 struct AppState {
     conn: Mutex<rusqlite::Connection>,
     room_listeners: Mutex<HashMap<u64, broadcast::Sender<Arc<ChatItem>>>>,
+    used_nonces: Mutex<ExpiringSet<u32>>,
 
     base_url: Box<str>,
 }
@@ -81,8 +87,31 @@ impl AppState {
         Ok(Self {
             conn: Mutex::new(conn),
             room_listeners: Mutex::new(HashMap::new()),
+            used_nonces: Mutex::new(ExpiringSet::new(Duration::from_secs(TIMESTAMP_TOLERENCE))),
+
             base_url,
         })
+    }
+
+    fn verify_signed_data<T: Serialize>(&self, data: &WithSig<T>) -> Result<()> {
+        data.verify().context("unsigned payload")?;
+        let timestamp_diff = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .expect("after UNIX epoch")
+            .as_secs()
+            .abs_diff(data.signee.timestamp);
+        ensure!(
+            timestamp_diff <= TIMESTAMP_TOLERENCE,
+            "invalid timestamp, off by {timestamp_diff}s"
+        );
+        ensure!(
+            self.used_nonces
+                .lock()
+                .unwrap()
+                .try_insert(data.signee.nonce),
+            "duplicated nonce",
+        );
+        Ok(())
     }
 }
 
@@ -406,14 +435,20 @@ fn query_room_items(
 struct SignedJson<T>(WithSig<T>);
 
 #[async_trait]
-impl<S: Send + Sync, T: Serialize + DeserializeOwned> FromRequest<S> for SignedJson<T> {
+impl<S, T> FromRequest<S> for SignedJson<T>
+where
+    S: Send + Sync,
+    T: Serialize + DeserializeOwned,
+    Arc<AppState>: FromRef<S>,
+{
     type Rejection = Response;
 
     async fn from_request(req: Request, state: &S) -> Result<Self, Self::Rejection> {
         let Json(data) = <Json<WithSig<T>> as FromRequest<S>>::from_request(req, state)
             .await
             .map_err(|err| err.into_response())?;
-        data.verify().map_err(|err| {
+        let st = <Arc<AppState>>::from_ref(state);
+        st.verify_signed_data(&data).map_err(|err| {
             tracing::debug!(%err, "unsigned payload");
             StatusCode::BAD_REQUEST.into_response()
         })?;
@@ -426,21 +461,26 @@ impl<S: Send + Sync, T: Serialize + DeserializeOwned> FromRequest<S> for SignedJ
 struct OptionalAuth(Option<UserKey>);
 
 #[async_trait]
-impl<S: Send + Sync> FromRequestParts<S> for OptionalAuth {
+impl<S> FromRequestParts<S> for OptionalAuth
+where
+    S: Send + Sync,
+    Arc<AppState>: FromRef<S>,
+{
     type Rejection = StatusCode;
 
     async fn from_request_parts(
         parts: &mut request::Parts,
-        _state: &S,
+        state: &S,
     ) -> Result<Self, Self::Rejection> {
         let Some(auth) = parts.headers.get(header::AUTHORIZATION) else {
             return Ok(Self(None));
         };
 
+        let st = <Arc<AppState>>::from_ref(state);
         let ret = serde_json::from_slice::<WithSig<AuthPayload>>(auth.as_bytes())
             .context("invalid JSON")
             .and_then(|data| {
-                data.verify()?;
+                st.verify_signed_data(&data)?;
                 Ok(data.signee.user)
             });
         match ret {

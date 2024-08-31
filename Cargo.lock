@@ -223,7 +223,6 @@ dependencies = [
 name = "blah"
 version = "0.0.0"
 dependencies = [
- "anyhow",
  "bitflags",
  "bitflags_serde_shim",
  "ed25519-dalek",
