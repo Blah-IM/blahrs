@@ -7,6 +7,12 @@ members = [
 ]
 default-members = ["blahd"]
 
+[workspace.lints.clippy]
+dbg_macro = "warn"
+print_stderr = "warn"
+print_stdout = "warn"
+todo = "warn"
+
 [package]
 name = "blah"
 version = "0.0.0"
@@ -25,3 +31,6 @@ serde = { version = "1", features = ["derive"] }
 serde_jcs = "0.1"
 serde_json = "1"
 uuid = { version = "1", features = ["serde"] }
+
+[lints]
+workspace = true

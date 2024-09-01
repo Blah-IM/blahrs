@@ -14,3 +14,7 @@ rusqlite = "0.32"
 tokio = { version = "1", features = ["rt", "macros"] }
 
 blah = { path = "..", features = ["rusqlite"] }
+
+[lints.clippy]
+dbg_macro = "warn"
+todo = "warn"

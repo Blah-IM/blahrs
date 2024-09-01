@@ -356,7 +356,7 @@ async fn room_get_feed(
     ))
 }
 
-/// Ref: https://www.jsonfeed.org/version/1.1/
+/// Ref: <https://www.jsonfeed.org/version/1.1/>
 #[derive(Debug, Serialize)]
 #[serde(tag = "version", rename = "https://jsonfeed.org/version/1.1")]
 struct FeedRoom {
