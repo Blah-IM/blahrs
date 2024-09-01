@@ -90,10 +90,10 @@ async function generateKeypair() {
     joinRoomBtn.disabled = false;
 
     try {
-        const ser = (k) => crypto.subtle.exportKey('jwk', k);
+        const serialize = (k) => crypto.subtle.exportKey('jwk', k);
         localStorage.setItem('keypair', JSON.stringify({
-            publicKey: await ser(keypair.publicKey),
-            privateKey: await ser(keypair.privateKey),
+            publicKey: await serialize(keypair.publicKey),
+            privateKey: await serialize(keypair.privateKey),
         }));
     } catch (e) {
         console.error(e);

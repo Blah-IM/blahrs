@@ -75,7 +75,7 @@ paths:
       description: |
         Return chat items in reversed time order, up to PAGE_LEN items.
         The last (oldest) chat id can be used as query parameter for the next
-        GET, to repeatly fetch full history.
+        GET, to repeatedly fetch full history.
       headers:
         Authorization:
           description: Proof of membership for private rooms.

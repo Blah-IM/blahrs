@@ -29,5 +29,5 @@ max_request_len = 4096
 # Maximum length of a single event queue.
 event_queue_len = 1024
 
-# The maximum timestamp tolerence in seconds for request validation.
-timestamp_tolerence_secs = 90
+# The maximum timestamp tolerance in seconds for request validation.
+timestamp_tolerance_secs = 90

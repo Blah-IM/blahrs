@@ -68,7 +68,7 @@ impl<T: Serialize> WithSig<T> {
 
     /// Verify `sig` is valid for `signee`.
     ///
-    /// Note that this does nott check validity of timestamp and other data.
+    /// Note that this does not check validity of timestamp and other data.
     pub fn verify(&self) -> Result<(), SignatureError> {
         let canonical_signee = serde_jcs::to_vec(&self.signee).expect("serialization cannot fail");
         let sig = Signature::from_bytes(&self.sig);

@@ -34,7 +34,7 @@ pub struct ServerConfig {
     pub event_queue_len: usize,
 
     #[serde_inline_default(90)]
-    pub timestamp_tolerence_secs: u64,
+    pub timestamp_tolerance_secs: u64,
 }
 
 impl Config {

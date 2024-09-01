@@ -103,7 +103,7 @@ impl AppState {
             conn: Mutex::new(conn),
             room_listeners: Mutex::new(HashMap::new()),
             used_nonces: Mutex::new(ExpiringSet::new(Duration::from_secs(
-                config.server.timestamp_tolerence_secs,
+                config.server.timestamp_tolerance_secs,
             ))),
 
             config,
@@ -123,7 +123,7 @@ impl AppState {
             .expect("after UNIX epoch")
             .as_secs()
             .abs_diff(data.signee.timestamp);
-        if timestamp_diff > self.config.server.timestamp_tolerence_secs {
+        if timestamp_diff > self.config.server.timestamp_tolerance_secs {
             return Err(error_response!(
                 StatusCode::BAD_REQUEST,
                 "invalid_timestamp",
@@ -160,7 +160,7 @@ async fn main_async(st: AppState) -> Result<()> {
         .route("/room/:ruuid/item", get(room_get_item).post(room_post_item))
         .route("/room/:ruuid/admin", post(room_admin))
         .with_state(st.clone())
-        // NB. This comes at last (outmost layer), so inner errors will still be wraped with
+        // NB. This comes at last (outmost layer), so inner errors will still be wrapped with
         // correct CORS headers.
         .layer(tower_http::limit::RequestBodyLimitLayer::new(
             st.config.server.max_request_len,
