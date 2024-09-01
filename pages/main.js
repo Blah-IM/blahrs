@@ -9,6 +9,7 @@ let roomUrl = '';
 let roomUuid = null;
 let feed = null;
 let keypair = null;
+let defaultConfig = {};
 
 function bufToHex(buf) {
     return [...new Uint8Array(buf)]
@@ -307,11 +308,21 @@ async function postChat(text) {
 }
 
 window.onload = async (_) => {
+    try {
+        const resp = await fetch('./default.json');
+        if (resp.ok) {
+            defaultConfig = await resp.json();
+        }
+    } catch (e) {}
+
     if (!await loadKeypair()) {
         await generateKeypair();
     }
     if (keypair !== null) {
         userPubkeyDisplay.value = await getUserPubkey();
+    }
+    if (roomUrlInput.value === '' && defaultConfig.room_url) {
+        roomUrlInput.value = defaultConfig.room_url;
     }
     await connectRoom(roomUrlInput.value);
 };

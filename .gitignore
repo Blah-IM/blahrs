@@ -3,5 +3,6 @@
 *.key
 
 config.toml
+/pages/default.json
 result
 result-*
