@@ -27,20 +27,16 @@ rec {
         let
           pkgs = nixpkgs.legacyPackages.${system};
           naersk' = pkgs.callPackage naersk { };
-        in
-        rec {
-          default = blahd;
-          blahd = pkgs.callPackage (
+          mkPkg =
             {
               pkg-config,
               openssl,
               sqlite,
             }:
-            naersk'.buildPackage rec {
+            naersk'.buildPackage {
               pname = "blahd";
               src = ./.;
-              version = "git-${rev}";
-              CFG_RELEASE = version;
+              version = "0-unstable";
 
               nativeBuildInputs = [
                 pkg-config
@@ -50,10 +46,13 @@ rec {
                 sqlite
               ];
 
-              cargoBuildOptions = opts: opts ++ [
-                "--package=blahd"
-                "--package=blahctl"
-              ];
+              cargoBuildOptions =
+                opts:
+                opts
+                ++ [
+                  "--package=blahd"
+                  "--package=blahctl"
+                ];
 
               postInstall = ''
                 mkdir -p $out/etc/systemd/system
@@ -65,8 +64,14 @@ rec {
                 inherit description;
                 homepage = "https://github.com/Blah-IM/blahrs";
               };
-            }
-          ) { };
+            };
+        in
+        rec {
+          default = blahd;
+          blahd = (pkgs.callPackage mkPkg { }).overrideAttrs {
+            # Only set this for the main derivation, not for deps.
+            CFG_RELEASE = "git-${rev}";
+          };
         }
       );
 
