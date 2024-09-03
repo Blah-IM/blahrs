@@ -178,25 +178,26 @@ async function connectRoom(url) {
 
     log(`fetching room: ${url}`);
 
-    const auth = await signData({ typ: 'auth' });
-    fetch(
-        `${url}/item`,
-        {
-            headers: {
-                'Authorization': auth,
-            },
-        },
-    )
-    .then(async (resp) => {
-        return [resp.status, await resp.json()];
-    })
-    // TODO: This response format is to-be-decided.
+    const genFetchOpts = async () => ({ headers: { 'Authorization': await signData({ typ: 'auth' }) } });
+    genFetchOpts()
+    .then(opts => fetch(url, opts))
+    .then(async (resp) => { return [resp.status, await resp.json()]; })
     .then(async ([status, json]) => {
         if (status !== 200) throw new Error(`status ${status}: ${json.error.message}`);
-        const [{ title }, items] = json
-        document.title = `room: ${title}`
+        document.title = `room: ${json.title}`
+    })
+    .catch((e) => {
+        log(`failed to get room metadata: ${e}`);
+    });
+
+    genFetchOpts()
+    .then(opts => fetch(`${url}/item`, opts))
+    .then(async (resp) => { return [resp.status, await resp.json()]; })
+    .then(async ([status, json]) => {
+        if (status !== 200) throw new Error(`status ${status}: ${json.error.message}`);
+        const { items } = json
         items.reverse();
-        for (const [_cid, chat] of items) {
+        for (const chat of items) {
             await showChatMsg(chat);
         }
         log('---history---');

@@ -16,23 +16,6 @@ paths:
         interested in (eg. chat from joined rooms).
         The message has type `Outgoing` in `blahd/src/ws.rs`.
 
-  /room:
-    get:
-      summary: Get room metadata
-      responses:
-        200:
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/RoomMetadata'
-        404:
-          description: |
-            Room does not exist or the user does not have permission to get metadata of it.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ApiError'
-
   /room/create:
     post:
       summary: Create a new room
@@ -66,6 +49,24 @@ paths:
             application/json:
               $ref: '#/components/schemas/ApiError'
 
+  /room/{ruuid}:
+    get:
+      summary: Get room metadata
+      responses:
+        200:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RoomMetadata'
+        404:
+          description: |
+            Room does not exist or the user does not have permission to get metadata of it.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+
+
   /room/{ruuid}/feed.json:
     get:
       summary: JSON feed of room {ruuid}, which must be public readable
@@ -95,9 +96,16 @@ paths:
           schema:
             $ret: WithSig<AuthPayload>
       parameters:
-        before_id:
-          description: Filter items before (not including) a given chat id (cid).
+        top:
           in: query
+          description: |
+            The maximum number of items to return. This is an advice and may be
+            ignored by server.
+        skipToken:
+          in: query
+          description: |
+            Retrieve the next page of items, by providing the last item's `cid`
+            from the previous response.
       responses:
         200:
           content:
@@ -195,3 +203,15 @@ components:
           type: string
         attrs:
           type: int64
+
+    RoomItems:
+      type: object
+      required:
+        - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: 'WithSig<ChatPayload>'
+        skip_token:
+          type: string

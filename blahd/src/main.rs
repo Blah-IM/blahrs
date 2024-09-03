@@ -1,3 +1,4 @@
+use std::num::NonZeroUsize;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
@@ -17,8 +18,9 @@ use blah::types::{
 use config::Config;
 use ed25519_dalek::SIGNATURE_LENGTH;
 use middleware::{ApiError, OptionalAuth, SignedJson};
-use rusqlite::{named_params, params, OptionalExtension, Row};
+use rusqlite::{named_params, params, Connection, OptionalExtension, Row};
 use serde::{Deserialize, Serialize};
+use url::Url;
 use utils::ExpiringSet;
 use uuid::Uuid;
 
@@ -90,9 +92,6 @@ struct AppState {
 impl AppState {
     fn init(config: Config, conn: rusqlite::Connection) -> Result<Self> {
         static INIT_SQL: &str = include_str!("../init.sql");
-
-        // Should be validated by `Config`.
-        assert!(!config.server.base_url.ends_with('/'));
 
         conn.execute_batch(INIT_SQL)
             .context("failed to initialize database")?;
@@ -278,28 +277,42 @@ async fn room_create(
     Ok(Json(ruuid))
 }
 
-// NB. `next_url` generation depends on this structure.
-#[derive(Debug, Deserialize)]
-struct GetRoomItemParams {
-    #[serde(
-        default,
-        deserialize_with = "serde_aux::field_attributes::deserialize_number_from_string"
-    )]
-    before_id: u64,
-    page_len: Option<usize>,
+/// Pagination query parameters.
+///
+/// Field names are inspired by Microsoft's design, which is an extension to OData spec.
+/// See: <https://learn.microsoft.com/en-us/graph/query-parameters#odata-system-query-options>
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+struct Pagination {
+    /// A opaque token from previous response to fetch the next page.
+    skip_token: Option<u64>,
+    /// Maximum page size.
+    top: Option<NonZeroUsize>,
+}
+
+#[derive(Debug, Serialize)]
+struct RoomItems {
+    items: Vec<ChatItem>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    skip_token: Option<String>,
 }
 
 async fn room_get_item(
     st: ArcState,
     WithRejection(Path(ruuid), _): WithRejection<Path<Uuid>, ApiError>,
-    WithRejection(params, _): WithRejection<Query<GetRoomItemParams>, ApiError>,
+    WithRejection(Query(pagination), _): WithRejection<Query<Pagination>, ApiError>,
     OptionalAuth(user): OptionalAuth,
-) -> Result<impl IntoResponse, ApiError> {
-    let (room_meta, items) = query_room_items(&st, ruuid, user.as_ref(), &params)?;
-
-    // TODO: This format is to-be-decided. Or do we even need this interface other than
-    // `feed.json`?
-    Ok(Json((room_meta, items)))
+) -> Result<Json<RoomItems>, ApiError> {
+    let (items, skip_token) = {
+        let conn = st.conn.lock().unwrap();
+        get_room_if_readable(&conn, ruuid, user.as_ref(), |_row| Ok(()))?;
+        query_room_items(&st, &conn, ruuid, pagination)?
+    };
+    let items = items.into_iter().map(|(_, item)| item).collect();
+    Ok(Json(RoomItems {
+        items,
+        skip_token: skip_token.map(|x| x.to_string()),
+    }))
 }
 
 async fn room_get_metadata(
@@ -307,24 +320,28 @@ async fn room_get_metadata(
     WithRejection(Path(ruuid), _): WithRejection<Path<Uuid>, ApiError>,
     OptionalAuth(user): OptionalAuth,
 ) -> Result<Json<RoomMetadata>, ApiError> {
-    let (room_meta, _) = query_room_items(
-        &st,
-        ruuid,
-        user.as_ref(),
-        &GetRoomItemParams {
-            before_id: 0,
-            page_len: Some(0),
-        },
-    )?;
-    Ok(Json(room_meta))
+    let (title, attrs) =
+        get_room_if_readable(&st.conn.lock().unwrap(), ruuid, user.as_ref(), |row| {
+            Ok((
+                row.get::<_, String>("title")?,
+                row.get::<_, RoomAttrs>("attrs")?,
+            ))
+        })?;
+
+    Ok(Json(RoomMetadata { title, attrs }))
 }
 
 async fn room_get_feed(
     st: ArcState,
     WithRejection(Path(ruuid), _): WithRejection<Path<Uuid>, ApiError>,
-    params: Query<GetRoomItemParams>,
+    Query(pagination): Query<Pagination>,
 ) -> Result<impl IntoResponse, ApiError> {
-    let (room_meta, items) = query_room_items(&st, ruuid, None, &params)?;
+    let title;
+    let (items, skip_token) = {
+        let conn = st.conn.lock().unwrap();
+        title = get_room_if_readable(&conn, ruuid, None, |row| row.get::<_, String>("title"))?;
+        query_room_items(&st, &conn, ruuid, pagination)?
+    };
 
     let items = items
         .into_iter()
@@ -347,19 +364,28 @@ async fn room_get_feed(
         })
         .collect::<Vec<_>>();
 
-    let page_len = params
-        .page_len
-        .unwrap_or(st.config.server.max_page_len)
-        .min(st.config.server.max_page_len);
-
-    let base_url = &st.config.server.base_url;
-    let feed_url = format!("{base_url}/room/{ruuid}/feed.json");
-    let next_url = (items.len() == page_len).then(|| {
-        let last_id = &items.last().expect("page size is not 0").id;
-        format!("{feed_url}?before_id={last_id}")
+    let feed_url = st
+        .config
+        .server
+        .base_url
+        .join(&format!("/room/{ruuid}/feed.json"))
+        .expect("base_url must be valid");
+    let next_url = skip_token.map(|skip_token| {
+        let next_params = Pagination {
+            skip_token: Some(skip_token),
+            top: pagination.top,
+        };
+        let mut next_url = feed_url.clone();
+        {
+            let mut query = next_url.query_pairs_mut();
+            let ser = serde_urlencoded::Serializer::new(&mut query);
+            next_params.serialize(ser).unwrap();
+            query.finish();
+        }
+        next_url
     });
     let feed = FeedRoom {
-        title: room_meta.title,
+        title,
         items,
         next_url,
         feed_url,
@@ -376,9 +402,9 @@ async fn room_get_feed(
 #[serde(tag = "version", rename = "https://jsonfeed.org/version/1.1")]
 struct FeedRoom {
     title: String,
-    feed_url: String,
+    feed_url: Url,
     #[serde(skip_serializing_if = "Option::is_none")]
-    next_url: Option<String>,
+    next_url: Option<Url>,
     items: Vec<FeedItem>,
 }
 
@@ -405,7 +431,7 @@ struct FeedItemExtra {
     sig: [u8; SIGNATURE_LENGTH],
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize)]
 pub struct RoomMetadata {
     pub title: String,
     pub attrs: RoomAttrs,
@@ -440,40 +466,28 @@ fn get_room_if_readable<T>(
     .ok_or_else(|| error_response!(StatusCode::NOT_FOUND, "not_found", "room not found"))
 }
 
+type ChatItemWithId = (u64, ChatItem);
+
+/// Get room items with pagination parameters,
+/// return a page of items and the next skip_token if this is not the last page.
 fn query_room_items(
     st: &AppState,
+    conn: &Connection,
     ruuid: Uuid,
-    user: Option<&UserKey>,
-    params: &GetRoomItemParams,
-) -> Result<(RoomMetadata, Vec<(u64, ChatItem)>), ApiError> {
-    let conn = st.conn.lock().unwrap();
-
-    let (rid, title, attrs) = get_room_if_readable(&conn, ruuid, user, |row| {
-        Ok((
-            row.get::<_, u64>("rid")?,
-            row.get::<_, String>("title")?,
-            row.get::<_, RoomAttrs>("attrs")?,
-        ))
-    })?;
-
-    let room_meta = RoomMetadata { title, attrs };
-
-    if params.page_len == Some(0) {
-        return Ok((room_meta, Vec::new()));
-    }
-
-    let page_len = params
-        .page_len
-        .unwrap_or(st.config.server.max_page_len)
+    pagination: Pagination,
+) -> Result<(Vec<ChatItemWithId>, Option<u64>), ApiError> {
+    let page_len = pagination
+        .top
+        .map_or(usize::MAX, |n| n.get())
         .min(st.config.server.max_page_len);
-
     let mut stmt = conn.prepare(
         r"
         SELECT `cid`, `timestamp`, `nonce`, `sig`, `userkey`, `sig`, `rich_text`
-        FROM `room_item`
+        FROM `room`
+        JOIN `room_item` USING (`rid`)
         JOIN `user` USING (`uid`)
-        WHERE `rid` = :rid AND
-            (:before_cid = 0 OR `cid` < :before_cid)
+        WHERE `ruuid` = :ruuid AND
+            (:before_cid IS NULL OR `cid` < :before_cid)
         ORDER BY `cid` DESC
         LIMIT :limit
         ",
@@ -481,8 +495,8 @@ fn query_room_items(
     let items = stmt
         .query_and_then(
             named_params! {
-                ":rid": rid,
-                ":before_cid": params.before_id,
+                ":ruuid": ruuid,
+                ":before_cid": pagination.skip_token,
                 ":limit": page_len,
             },
             |row| {
@@ -503,8 +517,10 @@ fn query_room_items(
             },
         )?
         .collect::<rusqlite::Result<Vec<_>>>()?;
+    let skip_token =
+        (items.len() == page_len).then(|| items.last().expect("page must not be empty").0);
 
-    Ok((room_meta, items))
+    Ok((items, skip_token))
 }
 
 async fn room_post_item(

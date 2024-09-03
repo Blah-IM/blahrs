@@ -4,6 +4,7 @@ use std::time::Duration;
 use anyhow::{ensure, Result};
 use serde::{Deserialize, Deserializer};
 use serde_inline_default::serde_inline_default;
+use url::Url;
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -25,7 +26,7 @@ pub struct DatabaseConfig {
 #[serde(deny_unknown_fields)]
 pub struct ServerConfig {
     pub listen: String,
-    pub base_url: String,
+    pub base_url: Url,
 
     #[serde_inline_default(1024)]
     pub max_page_len: usize,
@@ -52,8 +53,8 @@ fn de_duration_sec<'de, D: Deserializer<'de>>(de: D) -> Result<Duration, D::Erro
 impl Config {
     pub fn validate(&self) -> Result<()> {
         ensure!(
-            !self.server.base_url.ends_with("/"),
-            "base_url must not have trailing slash",
+            !self.server.base_url.cannot_be_a_base(),
+            "base_url must be able to be a base",
         );
         Ok(())
     }
