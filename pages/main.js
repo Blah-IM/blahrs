@@ -1,12 +1,13 @@
 const msgFlow = document.querySelector('#msg-flow');
 const userPubkeyDisplay = document.querySelector('#user-pubkey');
-const roomUrlInput = document.querySelector('#room-url');
+const serverUrlInput = document.querySelector('#server-url');
+const roomsInput = document.querySelector('#rooms');
+const joinNewRoomInput = document.querySelector('#join-new-room');
 const chatInput = document.querySelector('#chat');
 const regenKeyBtn = document.querySelector('#regen-key');
-const joinRoomBtn = document.querySelector('#join-room');
 
-let roomUrl = '';
-let roomUuid = null;
+let serverUrl = null;
+let curRoom = null;
 let ws = null;
 let keypair = null;
 let defaultConfig = {};
@@ -65,9 +66,7 @@ async function loadKeypair() {
 
 async function generateKeypair() {
     log('generating keypair');
-    regenKeyBtn.disabled = true;
-    chatInput.disabled = true;
-    joinRoomBtn.disabled = true;
+    document.querySelectorAll('input, button, select').forEach((el) => el.disabled = true);
     try {
         keypair = await crypto.subtle.generateKey('Ed25519', true, ['sign', 'verify']);
     } catch (e) {
@@ -84,10 +83,7 @@ async function generateKeypair() {
     }
 
     log('keypair generated');
-
-    regenKeyBtn.disabled = false;
-    chatInput.disabled = false;
-    joinRoomBtn.disabled = false;
+    document.querySelectorAll('input, button, select').forEach((el) => el.disabled = false);
 
     try {
         const serialize = (k) => crypto.subtle.exportKey('jwk', k);
@@ -165,23 +161,21 @@ function escapeHtml(text) {
         .replaceAll("'", '&#039;');
 }
 
-async function connectRoom(url) {
-    if (url === '' || url == roomUrl || keypair === null) return;
-    const match = url.match(/^https?:\/\/.*\/([a-z0-9]{8}-[a-z0-9]{4}-[a-z0-9]{4}-[a-z0-9]{4}-[a-z0-9]{12})\/?/);
-    if (match === null) {
-        log('invalid room url');
-        return;
-    }
+async function genAuthHeader() {
+    return {
+        headers: {
+            'Authorization': await signData({ typ: 'auth' }),
+        },
+    };
+}
 
-    roomUrl = url;
-    roomUuid = match[1];
+async function enterRoom(ruuid) {
+    log(`loading room: ${ruuid}`);
+    curRoom = ruuid;
 
-    log(`fetching room: ${url}`);
-
-    const genFetchOpts = async () => ({ headers: { 'Authorization': await signData({ typ: 'auth' }) } });
-    genFetchOpts()
-    .then(opts => fetch(url, opts))
-    .then(async (resp) => { return [resp.status, await resp.json()]; })
+    genAuthHeader()
+    .then(opts => fetch(`${serverUrl}/room/${ruuid}`, opts))
+    .then(async (resp) => [resp.status, await resp.json()])
     .then(async ([status, json]) => {
         if (status !== 200) throw new Error(`status ${status}: ${json.error.message}`);
         document.title = `room: ${json.title}`
@@ -190,8 +184,8 @@ async function connectRoom(url) {
         log(`failed to get room metadata: ${e}`);
     });
 
-    genFetchOpts()
-    .then(opts => fetch(`${url}/item`, opts))
+    genAuthHeader()
+    .then(opts => fetch(`${serverUrl}/room/${ruuid}/item`, opts))
     .then(async (resp) => { return [resp.status, await resp.json()]; })
     .then(async ([status, json]) => {
         if (status !== 200) throw new Error(`status ${status}: ${json.error.message}`);
@@ -205,24 +199,31 @@ async function connectRoom(url) {
     .catch((e) => {
         log(`failed to fetch history: ${e}`);
     });
-
-    // TODO: There is a time window where events would be lost.
-
-    await connectWs();
 }
 
-async function connectWs() {
+async function connectServer(newServerUrl) {
+    if (newServerUrl === '' || keypair === null) return;
+    let wsUrl
+    try {
+        wsUrl = new URL(newServerUrl);
+    } catch (e) {
+        log(`invalid url: ${e}`);
+        return;
+    }
+    serverUrl = newServerUrl;
+
     if (ws !== null) {
         ws.close();
     }
-    const wsUrl = new URL(roomUrl);
+
+    log('connecting server');
     wsUrl.protocol = wsUrl.protocol == 'http:' ? 'ws:' : 'wss:';
     wsUrl.pathname = '/ws';
     ws = new WebSocket(wsUrl);
     ws.onopen = async (_) => {
         const auth = await signData({ typ: 'auth' });
         await ws.send(auth);
-        log('listening on events');
+        log(`listening events on server: ${serverUrl}`);
     }
     ws.onclose = (e) => {
         console.error(e);
@@ -236,32 +237,69 @@ async function connectWs() {
         console.log('ws event', e.data);
         const msg = JSON.parse(e.data);
         if (msg.chat !== undefined) {
-            showChatMsg(msg.chat);
+            if (msg.chat.signee.payload.room === curRoom) {
+                await showChatMsg(msg.chat);
+            } else {
+                console.log('ignore background room item');
+            }
         } else if (msg.lagged !== undefined) {
             log('some events are dropped because of queue overflow')
         } else {
             log(`unknown ws message: ${e.data}`);
         }
     };
+
+    loadRoomList(true);
 }
 
-async function joinRoom() {
+async function loadRoomList(autoJoin) {
+    log('loading room list');
+
+    async function loadInto(targetEl, filter) {
+        try {
+            targetEl.replaceChildren();
+            const resp = await fetch(`${serverUrl}/room?filter=${filter}`, await genAuthHeader())
+            const json = await resp.json()
+            if (resp.status !== 200) throw new Error(`status ${resp.status}: ${json.error.message}`);
+            for (const { ruuid, title, attrs } of json.rooms) {
+                const el = document.createElement('option');
+                el.value = ruuid;
+                el.innerText = `${title} (uuid=${ruuid}, attrs=${attrs})`;
+                targetEl.appendChild(el);
+            }
+        } catch (e) {
+            log(`failed to load room list: ${err}`)
+        }
+    }
+
+    loadInto(roomsInput, 'joined')
+    .then(async (_) => {
+        if (autoJoin && roomsInput.value !== '') {
+            await enterRoom(roomsInput.value);
+        }
+    });
+
+    loadInto(joinNewRoomInput, 'public')
+}
+
+async function joinRoom(ruuid) {
     try {
-        joinRoomBtn.disabled = true;
-        await signAndPost(`${roomUrl}/admin`, {
+        joinNewRoomInput.disabled = true;
+        await signAndPost(`${serverUrl}/room/${ruuid}/admin`, {
             // sorted fields.
             permission: 1, // POST_CHAT
-            room: roomUuid,
+            room: ruuid,
             typ: 'add_member',
             user: await getUserPubkey(),
         });
         log('joined room');
-        await connectWs();
+        await loadRoomList(false)
+        await enterRoom(ruuid);
     } catch (e) {
         console.error(e);
         log(`failed to join room: ${e}`);
     } finally {
-        joinRoomBtn.disabled = false;
+        joinNewRoomInput.disabled = false;
     }
 }
 
@@ -302,7 +340,7 @@ async function signData(payload) {
 
 async function postChat(text) {
     text = text.trim();
-    if (keypair === null || roomUuid === null || text === '') return;
+    if (keypair === null || curRoom === null || text === '') return;
 
     chatInput.disabled = true;
 
@@ -313,10 +351,10 @@ async function postChat(text) {
         } else {
             richText = [text];
         }
-        await signAndPost(`${roomUrl}/item`, {
+        await signAndPost(`${serverUrl}/room/${curRoom}/item`, {
             // sorted fields.
             rich_text: richText,
-            room: roomUuid,
+            room: curRoom,
             typ: 'chat',
         });
         chatInput.value = '';
@@ -342,13 +380,15 @@ window.onload = async (_) => {
     if (keypair !== null) {
         userPubkeyDisplay.value = await getUserPubkey();
     }
-    if (roomUrlInput.value === '' && defaultConfig.room_url) {
-        roomUrlInput.value = defaultConfig.room_url;
+    if (serverUrlInput.value === '' && defaultConfig.server_url) {
+        serverUrlInput.value = defaultConfig.server_url;
     }
-    await connectRoom(roomUrlInput.value);
+    if (serverUrlInput.value !== '') {
+        await connectServer(serverUrlInput.value);
+    }
 };
-roomUrlInput.onchange = async (e) => {
-    await connectRoom(e.target.value);
+serverUrlInput.onchange = async (e) => {
+    await connectServer(e.target.value);
 };
 chatInput.onkeypress = async (e) => {
     if (e.key === 'Enter') {
@@ -358,6 +398,12 @@ chatInput.onkeypress = async (e) => {
 regenKeyBtn.onclick = async (_) => {
     await generateKeypair();
 };
-joinRoomBtn.onclick = async (_) => {
-    await joinRoom();
+roomsInput.onchange = async (_) => {
+    await enterRoom(roomsInput.value);
+};
+joinNewRoomInput.onchange = async (_) => {
+    await joinRoom(joinNewRoomInput.value);
+};
+document.querySelector('#refresh-rooms').onclick = async (_) => {
+    await loadRoomList(true);
 };

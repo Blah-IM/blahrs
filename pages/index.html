@@ -22,23 +22,24 @@
       .log {
         margin: auto;
         font-style: italic;
-      }
-      .log::before {
-        content: "«";
-      }
-      .log::after {
-        content: "»";
+        &::before {
+            content: "«";
+        }
+        &::after {
+            content: "»";
+        }
       }
 
       #input-area > * {
         display: flex;
         flex-direction: row;
-      }
-      #input-area > * > label {
-        margin: auto;
-      }
-      #input-area > * > input {
-        flex: 1;
+        & > label {
+            margin: auto;
+        }
+        & > input,
+        & > select {
+            flex: 1;
+        }
       }
     </style>
   </head>
@@ -53,17 +54,24 @@
         <input type="text" id="user-pubkey" placeholder="-" readonly />
         <button id="regen-key">regenerate</button>
       </div>
-
       <div>
-        <label for="room-url">room url:</label>
+        <label for="server-url">server url:</label>
         <input
             type="url"
-            id="room-url"
+            id="server-url"
             placeholder="https://example.com"
             pattern="https://.*"
             required
             />
-        <button id="join-room">join room</button>
+      </div>
+      <div>
+        <label for="rooms">joined rooms:</label>
+        <select id="rooms"></select>
+
+        <label for="join-new-room">join public room:</label>
+        <select id="join-new-room"></select>
+
+        <button id="refresh-rooms">refresh room list</select>
       </div>
       <div>
         <label for="chat">chat:</label>
