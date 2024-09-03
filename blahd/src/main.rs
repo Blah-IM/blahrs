@@ -18,7 +18,7 @@ use blah::types::{
 use config::Config;
 use ed25519_dalek::SIGNATURE_LENGTH;
 use middleware::{ApiError, OptionalAuth, SignedJson};
-use rusqlite::{named_params, params, Connection, OptionalExtension, Row};
+use rusqlite::{named_params, params, Connection, OptionalExtension, Row, ToSql};
 use serde::{Deserialize, Serialize};
 use url::Url;
 use utils::ExpiringSet;
@@ -149,6 +149,7 @@ async fn main_async(st: AppState) -> Result<()> {
 
     let app = Router::new()
         .route("/ws", get(handle_ws))
+        .route("/room", get(room_list))
         .route("/room/create", post(room_create))
         .route("/room/:ruuid", get(room_get_metadata))
         // NB. Sync with `feed_url` and `next_url` generation.
@@ -194,6 +195,108 @@ async fn handle_ws(State(st): ArcState, ws: WebSocketUpgrade) -> Response {
             }
         }
     })
+}
+
+#[derive(Debug, Serialize)]
+struct RoomList {
+    rooms: Vec<RoomMetadata>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    skip_token: Option<u64>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+struct ListRoomParams {
+    filter: ListRoomFilter,
+    // Workaround: serde(flatten) breaks deserialization
+    // See: https://github.com/nox/serde_urlencoded/issues/33
+    skip_token: Option<u64>,
+    top: Option<NonZeroUsize>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum ListRoomFilter {
+    Public,
+    Joined,
+}
+
+async fn room_list(
+    st: ArcState,
+    WithRejection(params, _): WithRejection<Query<ListRoomParams>, ApiError>,
+    OptionalAuth(user): OptionalAuth,
+) -> Result<Json<RoomList>, ApiError> {
+    let pagination = Pagination {
+        skip_token: params.skip_token,
+        top: params.top,
+    };
+    let page_len = pagination.effective_page_len(&st);
+    let start_rid = pagination.skip_token.unwrap_or(0);
+
+    let query = |sql: &str, params: &[(&str, &dyn ToSql)]| -> Result<RoomList, ApiError> {
+        let mut last_rid = None;
+        let rooms = st
+            .conn
+            .lock()
+            .unwrap()
+            .prepare(sql)?
+            .query_map(params, |row| {
+                last_rid = Some(row.get::<_, u64>("rid")?);
+                Ok(RoomMetadata {
+                    ruuid: row.get("ruuid")?,
+                    title: row.get("title")?,
+                    attrs: row.get("attrs")?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        let skip_token = (rooms.len() == page_len).then_some(()).and(last_rid);
+        Ok(RoomList { rooms, skip_token })
+    };
+
+    match params.filter {
+        ListRoomFilter::Public => query(
+            r"
+            SELECT `rid`, `ruuid`, `title`, `attrs`
+            FROM `room`
+            WHERE `rid` > :start_rid AND
+                (`attrs` & :perm) = :perm
+            ORDER BY `rid` ASC
+            LIMIT :page_len
+            ",
+            named_params! {
+                ":start_rid": start_rid,
+                ":page_len": page_len,
+                ":perm": RoomAttrs::PUBLIC_READABLE,
+            },
+        ),
+        ListRoomFilter::Joined => {
+            let Some(user) = user else {
+                return Err(error_response!(
+                    StatusCode::UNAUTHORIZED,
+                    "unauthorized",
+                    "missing Authorization header for listing joined rooms",
+                ));
+            };
+            query(
+                r"
+                SELECT `rid`, `ruuid`, `title`, `attrs`
+                FROM `user`
+                JOIN `room_member` USING (`uid`)
+                JOIN `room` USING (`rid`)
+                WHERE `userkey` = :userkey AND
+                    `rid` > :start_rid
+                ORDER BY `rid` ASC
+                LIMIT :page_len
+                ",
+                named_params! {
+                    ":start_rid": start_rid,
+                    ":page_len": page_len,
+                    ":userkey": user,
+                },
+            )
+        }
+    }
+    .map(Json)
 }
 
 async fn room_create(
@@ -293,6 +396,15 @@ struct Pagination {
     top: Option<NonZeroUsize>,
 }
 
+impl Pagination {
+    fn effective_page_len(&self, st: &AppState) -> usize {
+        self.top
+            .unwrap_or(usize::MAX.try_into().unwrap())
+            .min(st.config.server.max_page_len)
+            .get()
+    }
+}
+
 #[derive(Debug, Serialize)]
 struct RoomItems {
     items: Vec<ChatItem>,
@@ -331,7 +443,11 @@ async fn room_get_metadata(
             ))
         })?;
 
-    Ok(Json(RoomMetadata { title, attrs }))
+    Ok(Json(RoomMetadata {
+        ruuid,
+        title,
+        attrs,
+    }))
 }
 
 async fn room_get_feed(
@@ -436,6 +552,7 @@ struct FeedItemExtra {
 
 #[derive(Debug, Serialize)]
 pub struct RoomMetadata {
+    pub ruuid: Uuid,
     pub title: String,
     pub attrs: RoomAttrs,
 }
@@ -479,10 +596,7 @@ fn query_room_items(
     ruuid: Uuid,
     pagination: Pagination,
 ) -> Result<(Vec<ChatItemWithId>, Option<u64>), ApiError> {
-    let page_len = pagination
-        .top
-        .map_or(usize::MAX, |n| n.get())
-        .min(st.config.server.max_page_len);
+    let page_len = pagination.effective_page_len(st);
     let mut stmt = conn.prepare(
         r"
         SELECT `cid`, `timestamp`, `nonce`, `sig`, `userkey`, `sig`, `rich_text`

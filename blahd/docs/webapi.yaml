@@ -16,6 +16,46 @@ paths:
         interested in (eg. chat from joined rooms).
         The message has type `Outgoing` in `blahd/src/ws.rs`.
 
+  /room:
+    get:
+      summary: List rooms on the server
+      parameters:
+        filter:
+          in: query
+          required: true
+          description: |
+            Either "public" or "joined".
+            For "public", it returns all public rooms on the server.
+            For "joined", `Authorization` must be provided and it will return
+            rooms user have joined.
+        page_len:
+          in: query
+          description:
+            The maximum number of items returned in each page. This is only an
+            advice and server can clamp it to a smaller value.
+        page_token:
+          in: query
+          description:
+            The page token returned from a previous list response to fetch the
+            next page. NB. Other parameters (eg. `joined` and `page_len`)
+            should be included (as the same value) for each page fetch.
+      headers:
+        Authorization:
+          description: Proof of membership for private rooms. Required if `joined` is true.
+          required: false
+          schema:
+            $ret: WithSig<AuthPayload>
+      responses:
+        200:
+          content:
+            application/json:
+              $ref: '#/components/schema/ListRoom'
+        401:
+          description: Missing or invalid Authorization header.
+          content:
+            application/json:
+              $ref: '#/components/schemas/ApiError'
+
   /room/create:
     post:
       summary: Create a new room
@@ -196,9 +236,24 @@ components:
             message:
               type: string
 
+    RoomList:
+      type: object
+      required:
+        - rooms
+      properties:
+        rooms:
+          type: array
+          items:
+            $ref: '#/components/schemas/RoomMetadata'
+        next_token:
+          type: string
+          description: An opaque token to fetch the next page.
+
     RoomMetadata:
       type: object
       properties:
+        ruuid:
+          type: string
         title:
           type: string
         attrs:

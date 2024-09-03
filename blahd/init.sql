@@ -21,6 +21,8 @@ CREATE TABLE IF NOT EXISTS `room_member` (
     PRIMARY KEY (`rid`, `uid`)
 ) STRICT;
 
+CREATE INDEX IF NOT EXISTS `member_room` ON `room_member` (`uid` ASC, `rid` ASC);
+
 CREATE TABLE IF NOT EXISTS `room_item` (
     `cid`       INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
     `rid`       INTEGER NOT NULL REFERENCES `room` ON DELETE CASCADE,

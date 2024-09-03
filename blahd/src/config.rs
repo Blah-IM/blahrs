@@ -1,3 +1,4 @@
+use std::num::NonZeroUsize;
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -28,8 +29,8 @@ pub struct ServerConfig {
     pub listen: String,
     pub base_url: Url,
 
-    #[serde_inline_default(1024)]
-    pub max_page_len: usize,
+    #[serde_inline_default(1024.try_into().unwrap())]
+    pub max_page_len: NonZeroUsize,
     #[serde_inline_default(4096)] // 4KiB
     pub max_request_len: usize,
 
