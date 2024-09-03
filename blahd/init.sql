@@ -32,3 +32,5 @@ CREATE TABLE IF NOT EXISTS `room_item` (
     `sig`       BLOB NOT NULL,
     `rich_text` TEXT NOT NULL
 ) STRICT;
+
+CREATE INDEX IF NOT EXISTS `room_latest_item` ON `room_item` (`rid` ASC, `cid` DESC);

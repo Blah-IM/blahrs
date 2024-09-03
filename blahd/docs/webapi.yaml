@@ -244,10 +244,23 @@ components:
         rooms:
           type: array
           items:
-            $ref: '#/components/schemas/RoomMetadata'
+            $ref: '#/components/schemas/RoomMetadataForList'
         next_token:
           type: string
           description: An opaque token to fetch the next page.
+
+    RoomMetadataForList:
+      type: object
+      required: ['ruuid', 'title', 'attrs']
+      properties:
+        ruuid:
+          type: string
+        title:
+          type: string
+        attrs:
+          type: int64
+        last_chat:
+          $ref: 'WithSig<ChatPayload>'
 
     RoomMetadata:
       type: object

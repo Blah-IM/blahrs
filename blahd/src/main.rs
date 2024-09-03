@@ -241,11 +241,33 @@ async fn room_list(
             .unwrap()
             .prepare(sql)?
             .query_map(params, |row| {
+                // TODO: Extract this into a function.
                 last_rid = Some(row.get::<_, u64>("rid")?);
+                let ruuid = row.get("ruuid")?;
+                let title = row.get("title")?;
+                let attrs = row.get("attrs")?;
+                let last_chat = row
+                    .get::<_, Option<UserKey>>("userkey")?
+                    .map(|user| {
+                        Ok::<_, rusqlite::Error>(ChatItem {
+                            sig: row.get("sig")?,
+                            signee: Signee {
+                                nonce: row.get("nonce")?,
+                                timestamp: row.get("timestamp")?,
+                                user,
+                                payload: ChatPayload {
+                                    rich_text: row.get("rich_text")?,
+                                    room: ruuid,
+                                },
+                            },
+                        })
+                    })
+                    .transpose()?;
                 Ok(RoomMetadata {
-                    ruuid: row.get("ruuid")?,
-                    title: row.get("title")?,
-                    attrs: row.get("attrs")?,
+                    ruuid,
+                    title,
+                    attrs,
+                    last_chat,
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;
@@ -256,10 +278,14 @@ async fn room_list(
     match params.filter {
         ListRoomFilter::Public => query(
             r"
-            SELECT `rid`, `ruuid`, `title`, `attrs`
+            SELECT `rid`, `ruuid`, `title`, `attrs`,
+                `last_author`.`userkey` AS `userkey`, `timestamp`, `nonce`, `sig`, `rich_text`
             FROM `room`
+            LEFT JOIN `room_item` USING (`rid`)
+            LEFT JOIN `user` AS `last_author` USING (`uid`)
             WHERE `rid` > :start_rid AND
                 (`attrs` & :perm) = :perm
+            GROUP BY `rid` HAVING `cid` IS MAX(`cid`)
             ORDER BY `rid` ASC
             LIMIT :page_len
             ",
@@ -279,12 +305,17 @@ async fn room_list(
             };
             query(
                 r"
-                SELECT `rid`, `ruuid`, `title`, `attrs`
+                SELECT
+                    `rid`, `ruuid`, `title`, `attrs`,
+                    `last_author`.`userkey`, `timestamp`, `nonce`, `sig`, `rich_text`
                 FROM `user`
                 JOIN `room_member` USING (`uid`)
                 JOIN `room` USING (`rid`)
-                WHERE `userkey` = :userkey AND
+                LEFT JOIN `room_item` USING (`rid`)
+                LEFT JOIN `user` AS `last_author` ON (`last_author`.`uid` = `room_item`.`uid`)
+                WHERE `user`.`userkey` = :userkey AND
                     `rid` > :start_rid
+                GROUP BY `rid` HAVING `cid` IS MAX(`cid`)
                 ORDER BY `rid` ASC
                 LIMIT :page_len
                 ",
@@ -447,6 +478,7 @@ async fn room_get_metadata(
         ruuid,
         title,
         attrs,
+        last_chat: None,
     }))
 }
 
@@ -555,6 +587,10 @@ pub struct RoomMetadata {
     pub ruuid: Uuid,
     pub title: String,
     pub attrs: RoomAttrs,
+
+    /// Optional extra information. Only included by the global room list response.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_chat: Option<ChatItem>,
 }
 
 fn get_room_if_readable<T>(
