@@ -12,8 +12,8 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use axum_extra::extract::WithRejection;
 use blah::types::{
-    ChatItem, ChatPayload, CreateRoomPayload, MemberPermission, RoomAdminPayload, RoomAttrs,
-    ServerPermission, Signee, UserKey, WithSig,
+    ChatItem, ChatPayload, CreateRoomPayload, MemberPermission, RoomAdminOp, RoomAdminPayload,
+    RoomAttrs, ServerPermission, Signee, UserKey, WithSig,
 };
 use config::Config;
 use ed25519_dalek::SIGNATURE_LENGTH;
@@ -737,7 +737,7 @@ async fn room_admin(
     Path(ruuid): Path<Uuid>,
     SignedJson(op): SignedJson<RoomAdminPayload>,
 ) -> Result<StatusCode, ApiError> {
-    if ruuid != *op.signee.payload.room() {
+    if ruuid != op.signee.payload.room {
         return Err(error_response!(
             StatusCode::BAD_REQUEST,
             "invalid_request",
@@ -745,24 +745,45 @@ async fn room_admin(
         ));
     }
 
-    let RoomAdminPayload::AddMember {
-        permission, user, ..
-    } = op.signee.payload;
-    if user != op.signee.user {
-        return Err(error_response!(
-            StatusCode::NOT_IMPLEMENTED,
-            "not_implemented",
-            "only self-adding is implemented yet",
-        ));
-    }
-    if permission.is_empty() || !MemberPermission::MAX_SELF_ADD.contains(permission) {
-        return Err(error_response!(
-            StatusCode::BAD_REQUEST,
-            "deserialization",
-            "invalid permission",
-        ));
+    match op.signee.payload.op {
+        RoomAdminOp::AddMember { user, permission } => {
+            if user != op.signee.user {
+                return Err(error_response!(
+                    StatusCode::NOT_IMPLEMENTED,
+                    "not_implemented",
+                    "only self-adding is implemented yet",
+                ));
+            }
+            if permission.is_empty() || !MemberPermission::MAX_SELF_ADD.contains(permission) {
+                return Err(error_response!(
+                    StatusCode::BAD_REQUEST,
+                    "deserialization",
+                    "invalid permission",
+                ));
+            }
+            room_join(&st, ruuid, user, permission).await?;
+        }
+        RoomAdminOp::RemoveMember { user } => {
+            if user != op.signee.user {
+                return Err(error_response!(
+                    StatusCode::NOT_IMPLEMENTED,
+                    "not_implemented",
+                    "only self-removing is implemented yet",
+                ));
+            }
+            room_leave(&st, ruuid, user).await?;
+        }
     }
 
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn room_join(
+    st: &AppState,
+    ruuid: Uuid,
+    user: UserKey,
+    permission: MemberPermission,
+) -> Result<(), ApiError> {
     let mut conn = st.conn.lock().unwrap();
     let txn = conn.transaction()?;
     let Some(rid) = txn
@@ -811,6 +832,49 @@ async fn room_admin(
         },
     )?;
     txn.commit()?;
+    Ok(())
+}
 
-    Ok(StatusCode::NO_CONTENT)
+async fn room_leave(st: &AppState, ruuid: Uuid, user: UserKey) -> Result<(), ApiError> {
+    let mut conn = st.conn.lock().unwrap();
+    let txn = conn.transaction()?;
+
+    let Some((rid, uid)) = txn
+        .query_row(
+            r"
+            SELECT `rid`, `uid`
+            FROM `room_member`
+            JOIN `room` USING (`rid`)
+            JOIN `user` USING (`uid`)
+            WHERE `ruuid` = :ruuid AND
+                `userkey` = :userkey
+            ",
+            named_params! {
+                ":ruuid": ruuid,
+                ":userkey": user,
+            },
+            |row| Ok((row.get::<_, u64>("rid")?, row.get::<_, u64>("uid")?)),
+        )
+        .optional()?
+    else {
+        return Err(error_response!(
+            StatusCode::NOT_FOUND,
+            "not_found",
+            "room does not exists or user is not a room member",
+        ));
+    };
+    txn.execute(
+        r"
+        DELETE FROM `room_member`
+        WHERE `rid` = :rid AND
+            `uid` = :uid
+        ",
+        named_params! {
+            ":rid": rid,
+            ":uid": uid,
+        },
+    )?;
+
+    txn.commit()?;
+    Ok(())
 }

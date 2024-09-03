@@ -326,23 +326,25 @@ pub struct RoomMember {
 #[serde(tag = "typ", rename = "auth")]
 pub struct AuthPayload {}
 
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(deny_unknown_fields, tag = "typ", rename_all = "snake_case")]
-pub enum RoomAdminPayload {
-    AddMember {
-        permission: MemberPermission,
-        room: Uuid,
-        user: UserKey,
-    },
-    // TODO: CRUD
+#[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "typ", rename_all = "snake_case")]
+pub struct RoomAdminPayload {
+    pub room: Uuid,
+    #[serde(flatten)]
+    pub op: RoomAdminOp,
 }
 
-impl RoomAdminPayload {
-    pub fn room(&self) -> &Uuid {
-        match self {
-            RoomAdminPayload::AddMember { room, .. } => room,
-        }
-    }
+#[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "typ", rename_all = "snake_case")]
+pub enum RoomAdminOp {
+    AddMember {
+        permission: MemberPermission,
+        user: UserKey,
+    },
+    RemoveMember {
+        user: UserKey,
+    },
+    // TODO: RU
 }
 
 bitflags! {
@@ -496,5 +498,24 @@ mod tests {
         );
         let got = serde_json::to_string(&text).unwrap();
         assert_eq!(got, raw);
+    }
+
+    #[test]
+    fn room_admin_serde() {
+        let data = RoomAdminPayload {
+            room: Uuid::nil(),
+            op: RoomAdminOp::AddMember {
+                permission: MemberPermission::POST_CHAT,
+                user: UserKey([0x42; PUBLIC_KEY_LENGTH]),
+            },
+        };
+        let raw = serde_jcs::to_string(&data).unwrap();
+
+        assert_eq!(
+            raw,
+            r#"{"permission":1,"room":"00000000-0000-0000-0000-000000000000","typ":"add_member","user":"4242424242424242424242424242424242424242424242424242424242424242"}"#
+        );
+        let got = serde_json::from_str::<RoomAdminPayload>(&raw).unwrap();
+        assert_eq!(got, data);
     }
 }

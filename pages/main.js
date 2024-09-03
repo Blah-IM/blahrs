@@ -2,6 +2,7 @@ const msgFlow = document.querySelector('#msg-flow');
 const userPubkeyDisplay = document.querySelector('#user-pubkey');
 const serverUrlInput = document.querySelector('#server-url');
 const roomsInput = document.querySelector('#rooms');
+const leaveRoomBtn = document.querySelector('#leave-room');
 const joinNewRoomInput = document.querySelector('#join-new-room');
 const chatInput = document.querySelector('#chat');
 const regenKeyBtn = document.querySelector('#regen-key');
@@ -172,6 +173,7 @@ async function genAuthHeader() {
 async function enterRoom(ruuid) {
     log(`loading room: ${ruuid}`);
     curRoom = ruuid;
+    roomsInput.value = ruuid;
 
     genAuthHeader()
     .then(opts => fetch(`${serverUrl}/room/${ruuid}`, opts))
@@ -218,7 +220,7 @@ async function connectServer(newServerUrl) {
 
     log('connecting server');
     wsUrl.protocol = wsUrl.protocol == 'http:' ? 'ws:' : 'wss:';
-    wsUrl.pathname += '/ws';
+    wsUrl.pathname += wsUrl.pathname.endsWith('/') ? 'ws' : '/ws';
     ws = new WebSocket(wsUrl);
     ws.onopen = async (_) => {
         const auth = await signData({ typ: 'auth' });
@@ -256,8 +258,14 @@ async function loadRoomList(autoJoin) {
     log('loading room list');
 
     async function loadInto(targetEl, filter) {
+        const emptyEl = document.createElement('option');
+        emptyEl.value = '';
+        emptyEl.innerText = '-';
+        emptyEl.disabled = true;
+        targetEl.replaceChildren(emptyEl);
+        targetEl.value = '';
+
         try {
-            targetEl.replaceChildren();
             const resp = await fetch(`${serverUrl}/room?filter=${filter}`, await genAuthHeader())
             const json = await resp.json()
             if (resp.status !== 200) throw new Error(`status ${resp.status}: ${json.error.message}`);
@@ -274,8 +282,11 @@ async function loadRoomList(autoJoin) {
 
     loadInto(roomsInput, 'joined')
     .then(async (_) => {
-        if (autoJoin && roomsInput.value !== '') {
-            await enterRoom(roomsInput.value);
+        if (autoJoin) {
+            const el = roomsInput.querySelector('option:nth-child(2)');
+            if (el !== null) {
+                await enterRoom(el.value);
+            }
         }
     });
 
@@ -302,6 +313,25 @@ async function joinRoom(ruuid) {
         joinNewRoomInput.disabled = false;
     }
 }
+
+async function leaveRoom() {
+    try {
+        leaveRoomBtn.disabled = true;
+        await signAndPost(`${serverUrl}/room/${curRoom}/admin`, {
+            room: curRoom,
+            typ: 'remove_member',
+            user: await getUserPubkey(),
+        });
+        log('left room');
+        await loadRoomList(true);
+    } catch (e) {
+        console.error(e);
+        log(`failed to leave room: ${e}`);
+    } finally {
+        leaveRoomBtn.disabled = false;
+    }
+}
+
 
 async function signAndPost(url, data) {
     const signedPayload = await signData(data);
@@ -397,6 +427,9 @@ chatInput.onkeypress = async (e) => {
 };
 regenKeyBtn.onclick = async (_) => {
     await generateKeypair();
+};
+leaveRoomBtn.onclick = async (_) => {
+    await leaveRoom();
 };
 roomsInput.onchange = async (_) => {
     await enterRoom(roomsInput.value);
