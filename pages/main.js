@@ -218,7 +218,7 @@ async function connectServer(newServerUrl) {
 
     log('connecting server');
     wsUrl.protocol = wsUrl.protocol == 'http:' ? 'ws:' : 'wss:';
-    wsUrl.pathname = '/ws';
+    wsUrl.pathname += '/ws';
     ws = new WebSocket(wsUrl);
     ws.onopen = async (_) => {
         const auth = await signData({ typ: 'auth' });
@@ -267,7 +267,7 @@ async function loadRoomList(autoJoin) {
                 el.innerText = `${title} (uuid=${ruuid}, attrs=${attrs})`;
                 targetEl.appendChild(el);
             }
-        } catch (e) {
+        } catch (err) {
             log(`failed to load room list: ${err}`)
         }
     }
