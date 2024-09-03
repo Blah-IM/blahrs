@@ -1,3 +1,4 @@
+use std::fmt;
 use std::sync::Arc;
 
 use axum::extract::rejection::{JsonRejection, PathRejection, QueryRejection};
@@ -21,6 +22,14 @@ pub struct ApiError {
     pub code: &'static str,
     pub message: String,
 }
+
+impl fmt::Display for ApiError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.message)
+    }
+}
+
+impl std::error::Error for ApiError {}
 
 macro_rules! error_response {
     ($status:expr, $code:literal, $msg:literal $(, $msg_args:expr)* $(,)?) => {

@@ -4,6 +4,18 @@ info:
   version: 0.0.1
 
 paths:
+  /ws:
+    get:
+      summary: WebSocket endpoint.
+      description: |
+        Once connection, client must send a JSON text message of type
+        `WithSig<AuthPayload>` for authentication.
+        If server does not close it immediately, it means success.
+
+        Then server will send JSON text messages on events that user are
+        interested in (eg. chat from joined rooms).
+        The message has type `Outgoing` in `blahd/src/ws.rs`.
+
   /room:
     get:
       summary: Get room metadata
@@ -129,34 +141,6 @@ paths:
         403:
           description: |
             The user does not have permission to post in this room, or the room does not exist.
-          content:
-            application/json:
-              $ref: '#/components/schemas/ApiError'
-
-  /room/{ruuid}/event:
-    get:
-      summary: Get an event stream for future new items.
-      description: |
-        This is a temporary interface, before a better notification system
-        (post notifications? websocket?) is implemented.
-      headers:
-        Authorization:
-          description: Proof of membership for private rooms.
-          required: false
-          schema:
-            $ret: WithSig<AuthPayload>
-      responses:
-        200:
-          content:
-            text/event-stream:
-              x-description: An event stream, each event is a JSON with type WithSig<ChatPayload>
-        400:
-          description: Body is invalid or fails the verification.
-          content:
-            application/json:
-              $ref: '#/components/schemas/ApiError'
-        404:
-          description: Room not found.
           content:
             application/json:
               $ref: '#/components/schemas/ApiError'

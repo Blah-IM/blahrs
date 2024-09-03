@@ -7,7 +7,7 @@ const joinRoomBtn = document.querySelector('#join-room');
 
 let roomUrl = '';
 let roomUuid = null;
-let feed = null;
+let ws = null;
 let keypair = null;
 let defaultConfig = {};
 
@@ -166,16 +166,13 @@ function escapeHtml(text) {
 }
 
 async function connectRoom(url) {
-    if (url === '' || url == roomUrl) return;
+    if (url === '' || url == roomUrl || keypair === null) return;
     const match = url.match(/^https?:\/\/.*\/([a-z0-9]{8}-[a-z0-9]{4}-[a-z0-9]{4}-[a-z0-9]{4}-[a-z0-9]{12})\/?/);
     if (match === null) {
         log('invalid room url');
         return;
     }
 
-    if (feed !== null) {
-        feed.close();
-    }
     roomUrl = url;
     roomUuid = match[1];
 
@@ -210,18 +207,40 @@ async function connectRoom(url) {
 
     // TODO: There is a time window where events would be lost.
 
-    feed = new EventSource(`${url}/event`);
-    feed.onopen = (_) => {
+    await connectWs();
+}
+
+async function connectWs() {
+    if (ws !== null) {
+        ws.close();
+    }
+    const wsUrl = new URL(roomUrl);
+    wsUrl.protocol = wsUrl.protocol == 'http:' ? 'ws:' : 'wss:';
+    wsUrl.pathname = '/ws';
+    ws = new WebSocket(wsUrl);
+    ws.onopen = async (_) => {
+        const auth = await signData({ typ: 'auth' });
+        await ws.send(auth);
         log('listening on events');
     }
-    feed.onerror = (e) => {
+    ws.onclose = (e) => {
         console.error(e);
-        log('event listener error');
+        log(`ws closed (code=${e.code}): ${e.reason}`);
     };
-    feed.onmessage = async (e) => {
-        console.log('feed event', e.data);
-        const chat = JSON.parse(e.data);
-        showChatMsg(chat);
+    ws.onerror = (e) => {
+        console.error(e);
+        log(`ws error: ${e.error}`);
+    };
+    ws.onmessage = async (e) => {
+        console.log('ws event', e.data);
+        const msg = JSON.parse(e.data);
+        if (msg.chat !== undefined) {
+            showChatMsg(msg.chat);
+        } else if (msg.lagged !== undefined) {
+            log('some events are dropped because of queue overflow')
+        } else {
+            log(`unknown ws message: ${e.data}`);
+        }
     };
 }
 
@@ -236,6 +255,7 @@ async function joinRoom() {
             user: await getUserPubkey(),
         });
         log('joined room');
+        await connectWs();
     } catch (e) {
         console.error(e);
         log(`failed to join room: ${e}`);

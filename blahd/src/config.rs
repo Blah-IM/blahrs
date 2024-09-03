@@ -1,7 +1,8 @@
 use std::path::PathBuf;
+use std::time::Duration;
 
 use anyhow::{ensure, Result};
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer};
 use serde_inline_default::serde_inline_default;
 
 #[derive(Debug, Clone, Deserialize)]
@@ -30,11 +31,22 @@ pub struct ServerConfig {
     pub max_page_len: usize,
     #[serde_inline_default(4096)] // 4KiB
     pub max_request_len: usize,
-    #[serde_inline_default(1024)]
-    pub event_queue_len: usize,
 
     #[serde_inline_default(90)]
     pub timestamp_tolerance_secs: u64,
+
+    #[serde_inline_default(Duration::from_secs(15))]
+    #[serde(deserialize_with = "de_duration_sec")]
+    pub ws_auth_timeout_sec: Duration,
+    #[serde_inline_default(Duration::from_secs(15))]
+    #[serde(deserialize_with = "de_duration_sec")]
+    pub ws_send_timeout_sec: Duration,
+    #[serde_inline_default(1024)]
+    pub ws_event_queue_len: usize,
+}
+
+fn de_duration_sec<'de, D: Deserializer<'de>>(de: D) -> Result<Duration, D::Error> {
+    <u64>::deserialize(de).map(Duration::from_secs)
 }
 
 impl Config {

@@ -1,14 +1,12 @@
-use std::collections::hash_map::Entry;
-use std::collections::HashMap;
-use std::convert::Infallible;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
 
 use anyhow::{Context, Result};
-use axum::extract::{Path, Query, State};
+use axum::extract::ws;
+use axum::extract::{Path, Query, State, WebSocketUpgrade};
 use axum::http::{header, StatusCode};
-use axum::response::{sse, IntoResponse};
+use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use axum_extra::extract::WithRejection;
@@ -21,14 +19,13 @@ use ed25519_dalek::SIGNATURE_LENGTH;
 use middleware::{ApiError, OptionalAuth, SignedJson};
 use rusqlite::{named_params, params, OptionalExtension, Row};
 use serde::{Deserialize, Serialize};
-use tokio::sync::broadcast;
-use tokio_stream::StreamExt;
 use utils::ExpiringSet;
 use uuid::Uuid;
 
 #[macro_use]
 mod middleware;
 mod config;
+mod event;
 mod utils;
 
 /// Blah Chat Server
@@ -84,8 +81,8 @@ fn main() -> Result<()> {
 #[derive(Debug)]
 struct AppState {
     conn: Mutex<rusqlite::Connection>,
-    room_listeners: Mutex<HashMap<u64, broadcast::Sender<Arc<ChatItem>>>>,
     used_nonces: Mutex<ExpiringSet<u32>>,
+    event: event::State,
 
     config: Config,
 }
@@ -101,10 +98,10 @@ impl AppState {
             .context("failed to initialize database")?;
         Ok(Self {
             conn: Mutex::new(conn),
-            room_listeners: Mutex::new(HashMap::new()),
             used_nonces: Mutex::new(ExpiringSet::new(Duration::from_secs(
                 config.server.timestamp_tolerance_secs,
             ))),
+            event: event::State::default(),
 
             config,
         })
@@ -152,11 +149,11 @@ async fn main_async(st: AppState) -> Result<()> {
     let st = Arc::new(st);
 
     let app = Router::new()
+        .route("/ws", get(handle_ws))
         .route("/room/create", post(room_create))
         .route("/room/:ruuid", get(room_get_metadata))
         // NB. Sync with `feed_url` and `next_url` generation.
         .route("/room/:ruuid/feed.json", get(room_get_feed))
-        .route("/room/:ruuid/event", get(room_event))
         .route("/room/:ruuid/item", get(room_get_item).post(room_post_item))
         .route("/room/:ruuid/admin", post(room_admin))
         .with_state(st.clone())
@@ -177,6 +174,24 @@ async fn main_async(st: AppState) -> Result<()> {
         .await
         .context("failed to serve")?;
     Ok(())
+}
+
+async fn handle_ws(State(st): ArcState, ws: WebSocketUpgrade) -> Response {
+    ws.on_upgrade(move |mut socket| async move {
+        match event::handle_ws(st, &mut socket).await {
+            Ok(never) => match never {},
+            Err(err) if err.is::<event::StreamEnded>() => {}
+            Err(err) => {
+                tracing::debug!(%err, "ws error");
+                let _: Result<_, _> = socket
+                    .send(ws::Message::Close(Some(ws::CloseFrame {
+                        code: ws::close_code::ERROR,
+                        reason: err.to_string().into(),
+                    })))
+                    .await;
+            }
+        }
+    })
 }
 
 async fn room_create(
@@ -505,7 +520,7 @@ async fn room_post_item(
         ));
     }
 
-    let (rid, cid) = {
+    let (cid, txs) = {
         let conn = st.conn.lock().unwrap();
         let Some((rid, uid)) = conn
             .query_row(
@@ -550,73 +565,38 @@ async fn room_post_item(
             },
             |row| row.get::<_, u64>(0),
         )?;
-        (rid, cid)
+
+        // FIXME: Optimize this to not traverses over all members.
+        let mut stmt = conn.prepare(
+            r"
+            SELECT `uid`
+            FROM `room_member`
+            WHERE `rid` = :rid
+            ",
+        )?;
+        let listeners = st.event.user_listeners.lock().unwrap();
+        let txs = stmt
+            .query_map(params![rid], |row| row.get::<_, u64>(0))?
+            .filter_map(|ret| match ret {
+                Ok(uid) => listeners.get(&uid).map(|tx| Ok(tx.clone())),
+                Err(err) => Some(Err(err)),
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        (cid, txs)
     };
 
-    let mut listeners = st.room_listeners.lock().unwrap();
-    if let Some(tx) = listeners.get(&rid) {
-        if tx.send(Arc::new(chat)).is_err() {
-            // Clean up because all receivers died.
-            listeners.remove(&rid);
-        }
-    }
-
-    Ok(Json(cid))
-}
-
-async fn room_event(
-    st: ArcState,
-    Path(ruuid): Path<Uuid>,
-    // TODO: There is actually no way to add headers via `EventSource` in client side.
-    // But this API is kinda temporary and need a better replacement anyway.
-    // So just only support public room for now.
-    OptionalAuth(user): OptionalAuth,
-) -> Result<impl IntoResponse, ApiError> {
-    let rid = get_room_if_readable(&st.conn.lock().unwrap(), ruuid, user.as_ref(), |row| {
-        row.get::<_, u64>(0)
-    })?;
-
-    let rx = match st.room_listeners.lock().unwrap().entry(rid) {
-        Entry::Occupied(ent) => ent.get().subscribe(),
-        Entry::Vacant(ent) => {
-            let (tx, rx) = broadcast::channel(st.config.server.event_queue_len);
-            ent.insert(tx);
-            rx
-        }
-    };
-
-    // Do clean up when this stream is closed.
-    struct CleanOnDrop {
-        st: Arc<AppState>,
-        rid: u64,
-    }
-    impl Drop for CleanOnDrop {
-        fn drop(&mut self) {
-            if let Ok(mut listeners) = self.st.room_listeners.lock() {
-                if let Some(tx) = listeners.get(&self.rid) {
-                    if tx.receiver_count() == 0 {
-                        listeners.remove(&self.rid);
-                    }
-                }
+    if !txs.is_empty() {
+        tracing::debug!("broadcasting event to {} clients", txs.len());
+        let chat = Arc::new(chat);
+        for tx in txs {
+            if let Err(err) = tx.send(chat.clone()) {
+                tracing::debug!(%err, "failed to broadcast event");
             }
         }
     }
 
-    let _guard = CleanOnDrop { st: st.0, rid };
-
-    let stream = tokio_stream::wrappers::BroadcastStream::new(rx).filter_map(move |ret| {
-        let _guard = &_guard;
-        // On stream closure or lagging, close the current stream so client can retry.
-        let item = ret.ok()?;
-        let evt = sse::Event::default()
-            .json_data(&*item)
-            .expect("serialization cannot fail");
-        Some(Ok::<_, Infallible>(evt))
-    });
-    // NB. Send an empty event immediately to trigger client ready event.
-    let first_event = sse::Event::default().comment("");
-    let stream = futures_util::stream::iter(Some(Ok(first_event))).chain(stream);
-    Ok(sse::Sse::new(stream).keep_alive(sse::KeepAlive::default()))
+    Ok(Json(cid))
 }
 
 async fn room_admin(

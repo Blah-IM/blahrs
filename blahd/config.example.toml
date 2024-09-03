@@ -26,8 +26,16 @@ max_page_len = 1024
 # Maximum request body length in bytes.
 max_request_len = 4096
 
-# Maximum length of a single event queue.
-event_queue_len = 1024
-
 # The maximum timestamp tolerance in seconds for request validation.
 timestamp_tolerance_secs = 90
+
+# The max waiting time for the first authentication message for websocket.
+ws_auth_timeout_sec = 15
+
+# The max waiting time for outgoing message to be received for websocket.
+ws_send_timeout_sec = 15
+
+# Maximum number of pending events a single user can have.
+# If events overflow the pending buffer, older events will be dropped and
+# client will be notified.
+ws_event_queue_len = 1024
