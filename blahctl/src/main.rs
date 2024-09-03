@@ -57,7 +57,10 @@ enum Command {
 }
 
 #[derive(Debug, clap::Subcommand)]
+#[allow(clippy::large_enum_variant)]
 enum DbCommand {
+    /// Create and initialize database.
+    Init,
     /// Set user property, possibly adding new users.
     SetUser {
         #[command(flatten)]
@@ -144,8 +147,6 @@ impl User {
     }
 }
 
-static INIT_SQL: &str = include_str!("../../blahd/init.sql");
-
 fn main() -> Result<()> {
     let cli = <Cli as clap::Parser>::parse();
 
@@ -157,9 +158,15 @@ fn main() -> Result<()> {
             io::stdout().write_all(pubkey_doc.as_bytes())?;
         }
         Command::Database { database, command } => {
-            let conn = Connection::open(database).context("failed to open database")?;
-            conn.execute_batch(INIT_SQL)
-                .context("failed to initialize database")?;
+            use rusqlite::OpenFlags;
+
+            let mut flags = OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NO_MUTEX;
+            flags.set(
+                OpenFlags::SQLITE_OPEN_CREATE,
+                matches!(command, DbCommand::Init),
+            );
+            let conn =
+                Connection::open_with_flags(database, flags).context("failed to open database")?;
             main_db(conn, command)?;
         }
         Command::Api { url, command } => build_rt()?.block_on(main_api(url, command))?,
@@ -177,6 +184,7 @@ fn build_rt() -> Result<Runtime> {
 
 fn main_db(conn: Connection, command: DbCommand) -> Result<()> {
     match command {
+        DbCommand::Init => {}
         DbCommand::SetUser { user, permission } => {
             let userkey = build_rt()?.block_on(user.fetch_key())?;
 

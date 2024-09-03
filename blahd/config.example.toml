@@ -3,10 +3,15 @@
 # the default value.
 
 [database]
+# (Required)
 # The path to the main SQLite database.
 # The file will be created and initialized if not exist, but missing directory
 # will not.
 path = "/var/lib/blahd/db.sqlite"
+
+# Whether to create and initialize the database if `path` does not exist.
+# Note that parent directory will never be created and must already exist.
+create = true
 
 [server]
 

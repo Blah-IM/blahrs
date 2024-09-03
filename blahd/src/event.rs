@@ -115,9 +115,8 @@ pub async fn handle_ws(st: Arc<AppState>, ws: &mut WebSocket) -> Result<Infallib
         let auth = serde_json::from_str::<WithSig<AuthPayload>>(&payload)?;
         st.verify_signed_data(&auth)?;
 
-        st.conn
-            .lock()
-            .unwrap()
+        st.db
+            .get()
             .query_row(
                 r"
                 SELECT `uid`

@@ -1,5 +1,5 @@
-PRAGMA journal_mode=WAL;
-PRAGMA foreign_keys=TRUE;
+-- TODO: We are still in prototyping phase. Database migration is not
+-- implemented and layout can change at any time.
 
 CREATE TABLE IF NOT EXISTS `user` (
     `uid`           INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,

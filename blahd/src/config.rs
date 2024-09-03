@@ -20,6 +20,8 @@ pub struct Config {
 pub struct DatabaseConfig {
     #[serde_inline_default("/var/lib/blahd/db.sqlite".into())]
     pub path: PathBuf,
+    #[serde_inline_default(true)]
+    pub create: bool,
 }
 
 #[serde_inline_default]

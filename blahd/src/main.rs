@@ -16,6 +16,7 @@ use blah::types::{
     RoomAttrs, ServerPermission, Signee, UserKey, WithSig,
 };
 use config::Config;
+use database::Database;
 use ed25519_dalek::SIGNATURE_LENGTH;
 use middleware::{ApiError, OptionalAuth, SignedJson};
 use rusqlite::{named_params, params, Connection, OptionalExtension, Row, ToSql};
@@ -27,6 +28,7 @@ use uuid::Uuid;
 #[macro_use]
 mod middleware;
 mod config;
+mod database;
 mod event;
 mod utils;
 
@@ -63,9 +65,7 @@ fn main() -> Result<()> {
     match cli {
         Cli::Serve { config } => {
             let config = parse_config(&config)?;
-            let db = rusqlite::Connection::open(&config.database.path)
-                .context("failed to open database")?;
-            let st = AppState::init(config, db).context("failed to initialize state")?;
+            let st = AppState::init(config).context("failed to initialize state")?;
             tokio::runtime::Builder::new_multi_thread()
                 .enable_all()
                 .build()
@@ -82,7 +82,7 @@ fn main() -> Result<()> {
 // Locks must be grabbed in the field order.
 #[derive(Debug)]
 struct AppState {
-    conn: Mutex<rusqlite::Connection>,
+    db: Database,
     used_nonces: Mutex<ExpiringSet<u32>>,
     event: event::State,
 
@@ -90,13 +90,9 @@ struct AppState {
 }
 
 impl AppState {
-    fn init(config: Config, conn: rusqlite::Connection) -> Result<Self> {
-        static INIT_SQL: &str = include_str!("../init.sql");
-
-        conn.execute_batch(INIT_SQL)
-            .context("failed to initialize database")?;
+    fn init(config: Config) -> Result<Self> {
         Ok(Self {
-            conn: Mutex::new(conn),
+            db: Database::open(&config.database).context("failed to open database")?,
             used_nonces: Mutex::new(ExpiringSet::new(Duration::from_secs(
                 config.server.timestamp_tolerance_secs,
             ))),
@@ -236,9 +232,8 @@ async fn room_list(
     let query = |sql: &str, params: &[(&str, &dyn ToSql)]| -> Result<RoomList, ApiError> {
         let mut last_rid = None;
         let rooms = st
-            .conn
-            .lock()
-            .unwrap()
+            .db
+            .get()
             .prepare(sql)?
             .query_map(params, |row| {
                 // TODO: Extract this into a function.
@@ -346,7 +341,7 @@ async fn room_create(
         ));
     }
 
-    let mut conn = st.conn.lock().unwrap();
+    let mut conn = st.db.get();
     let Some(true) = conn
         .query_row(
             r"
@@ -450,7 +445,7 @@ async fn room_get_item(
     OptionalAuth(user): OptionalAuth,
 ) -> Result<Json<RoomItems>, ApiError> {
     let (items, skip_token) = {
-        let conn = st.conn.lock().unwrap();
+        let conn = st.db.get();
         get_room_if_readable(&conn, ruuid, user.as_ref(), |_row| Ok(()))?;
         query_room_items(&st, &conn, ruuid, pagination)?
     };
@@ -466,13 +461,12 @@ async fn room_get_metadata(
     WithRejection(Path(ruuid), _): WithRejection<Path<Uuid>, ApiError>,
     OptionalAuth(user): OptionalAuth,
 ) -> Result<Json<RoomMetadata>, ApiError> {
-    let (title, attrs) =
-        get_room_if_readable(&st.conn.lock().unwrap(), ruuid, user.as_ref(), |row| {
-            Ok((
-                row.get::<_, String>("title")?,
-                row.get::<_, RoomAttrs>("attrs")?,
-            ))
-        })?;
+    let (title, attrs) = get_room_if_readable(&st.db.get(), ruuid, user.as_ref(), |row| {
+        Ok((
+            row.get::<_, String>("title")?,
+            row.get::<_, RoomAttrs>("attrs")?,
+        ))
+    })?;
 
     Ok(Json(RoomMetadata {
         ruuid,
@@ -489,7 +483,7 @@ async fn room_get_feed(
 ) -> Result<impl IntoResponse, ApiError> {
     let title;
     let (items, skip_token) = {
-        let conn = st.conn.lock().unwrap();
+        let conn = st.db.get();
         title = get_room_if_readable(&conn, ruuid, None, |row| row.get::<_, String>("title"))?;
         query_room_items(&st, &conn, ruuid, pagination)?
     };
@@ -690,7 +684,7 @@ async fn room_post_item(
     }
 
     let (cid, txs) = {
-        let conn = st.conn.lock().unwrap();
+        let conn = st.db.get();
         let Some((rid, uid)) = conn
             .query_row(
                 r"
@@ -820,7 +814,7 @@ async fn room_join(
     user: UserKey,
     permission: MemberPermission,
 ) -> Result<(), ApiError> {
-    let mut conn = st.conn.lock().unwrap();
+    let mut conn = st.db.get();
     let txn = conn.transaction()?;
     let Some(rid) = txn
         .query_row(
@@ -872,7 +866,7 @@ async fn room_join(
 }
 
 async fn room_leave(st: &AppState, ruuid: Uuid, user: UserKey) -> Result<(), ApiError> {
-    let mut conn = st.conn.lock().unwrap();
+    let mut conn = st.db.get();
     let txn = conn.transaction()?;
 
     let Some((rid, uid)) = txn
