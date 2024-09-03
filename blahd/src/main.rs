@@ -156,12 +156,15 @@ async fn main_async(st: AppState) -> Result<()> {
         .route("/room/:ruuid/item", get(room_get_item).post(room_post_item))
         .route("/room/:ruuid/admin", post(room_admin))
         .with_state(st.clone())
-        // NB. This comes at last (outmost layer), so inner errors will still be wrapped with
-        // correct CORS headers.
         .layer(tower_http::limit::RequestBodyLimitLayer::new(
             st.config.server.max_request_len,
         ))
-        .layer(tower_http::cors::CorsLayer::permissive());
+        // NB. This comes at last (outmost layer), so inner errors will still be wrapped with
+        // correct CORS headers. Also `Authorization` must be explicitly included besides `*`.
+        .layer(
+            tower_http::cors::CorsLayer::permissive()
+                .allow_headers([header::HeaderName::from_static("*"), header::AUTHORIZATION]),
+        );
 
     let listener = tokio::net::TcpListener::bind(&st.config.server.listen)
         .await
