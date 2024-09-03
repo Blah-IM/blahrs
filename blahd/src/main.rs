@@ -18,7 +18,7 @@ use blah::types::{
 use config::Config;
 use database::Database;
 use ed25519_dalek::SIGNATURE_LENGTH;
-use middleware::{ApiError, OptionalAuth, SignedJson};
+use middleware::{ApiError, MaybeAuth, ResultExt as _, SignedJson};
 use parking_lot::Mutex;
 use rusqlite::{named_params, params, Connection, OptionalExtension, Row, ToSql};
 use serde::{Deserialize, Serialize};
@@ -216,7 +216,7 @@ enum ListRoomFilter {
 async fn room_list(
     st: ArcState,
     WithRejection(params, _): WithRejection<Query<ListRoomParams>, ApiError>,
-    OptionalAuth(user): OptionalAuth,
+    auth: MaybeAuth,
 ) -> Result<Json<RoomList>, ApiError> {
     let pagination = Pagination {
         skip_token: params.skip_token,
@@ -287,13 +287,7 @@ async fn room_list(
             },
         ),
         ListRoomFilter::Joined => {
-            let Some(user) = user else {
-                return Err(error_response!(
-                    StatusCode::UNAUTHORIZED,
-                    "unauthorized",
-                    "missing Authorization header for listing joined rooms",
-                ));
-            };
+            let user = auth?.0;
             query(
                 r"
                 SELECT
@@ -438,11 +432,11 @@ async fn room_get_item(
     st: ArcState,
     WithRejection(Path(ruuid), _): WithRejection<Path<Uuid>, ApiError>,
     WithRejection(Query(pagination), _): WithRejection<Query<Pagination>, ApiError>,
-    OptionalAuth(user): OptionalAuth,
+    auth: MaybeAuth,
 ) -> Result<Json<RoomItems>, ApiError> {
     let (items, skip_token) = {
         let conn = st.db.get();
-        get_room_if_readable(&conn, ruuid, user.as_ref(), |_row| Ok(()))?;
+        get_room_if_readable(&conn, ruuid, auth.into_optional()?.as_ref(), |_row| Ok(()))?;
         query_room_items(&st, &conn, ruuid, pagination)?
     };
     let items = items.into_iter().map(|(_, item)| item).collect();
@@ -455,14 +449,15 @@ async fn room_get_item(
 async fn room_get_metadata(
     st: ArcState,
     WithRejection(Path(ruuid), _): WithRejection<Path<Uuid>, ApiError>,
-    OptionalAuth(user): OptionalAuth,
+    auth: MaybeAuth,
 ) -> Result<Json<RoomMetadata>, ApiError> {
-    let (title, attrs) = get_room_if_readable(&st.db.get(), ruuid, user.as_ref(), |row| {
-        Ok((
-            row.get::<_, String>("title")?,
-            row.get::<_, RoomAttrs>("attrs")?,
-        ))
-    })?;
+    let (title, attrs) =
+        get_room_if_readable(&st.db.get(), ruuid, auth.into_optional()?.as_ref(), |row| {
+            Ok((
+                row.get::<_, String>("title")?,
+                row.get::<_, RoomAttrs>("attrs")?,
+            ))
+        })?;
 
     Ok(Json(RoomMetadata {
         ruuid,

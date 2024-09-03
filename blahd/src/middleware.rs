@@ -109,36 +109,79 @@ where
     }
 }
 
-/// Extractor for optional verified JSON authorization header.
 #[derive(Debug)]
-pub struct OptionalAuth(pub Option<UserKey>);
+pub enum AuthRejection {
+    None,
+    Invalid(ApiError),
+}
+
+impl From<AuthRejection> for ApiError {
+    fn from(rej: AuthRejection) -> Self {
+        match rej {
+            AuthRejection::None => error_response!(
+                StatusCode::UNAUTHORIZED,
+                "unauthorized",
+                "missing authorization header"
+            ),
+            AuthRejection::Invalid(err) => err,
+        }
+    }
+}
+
+impl IntoResponse for AuthRejection {
+    fn into_response(self) -> Response {
+        ApiError::from(self).into_response()
+    }
+}
+
+pub trait ResultExt {
+    fn into_optional(self) -> Result<Option<UserKey>, ApiError>;
+}
+
+impl ResultExt for Result<Auth, AuthRejection> {
+    fn into_optional(self) -> Result<Option<UserKey>, ApiError> {
+        match self {
+            Ok(auth) => Ok(Some(auth.0)),
+            Err(AuthRejection::None) => Ok(None),
+            Err(AuthRejection::Invalid(err)) => Err(err),
+        }
+    }
+}
+
+pub type MaybeAuth = Result<Auth, AuthRejection>;
+
+/// Extractor for verified JSON authorization header.
+#[derive(Debug)]
+pub struct Auth(pub UserKey);
 
 #[async_trait]
-impl<S> FromRequestParts<S> for OptionalAuth
+impl<S> FromRequestParts<S> for Auth
 where
     S: Send + Sync,
     Arc<AppState>: FromRef<S>,
 {
-    type Rejection = ApiError;
+    type Rejection = AuthRejection;
 
     async fn from_request_parts(
         parts: &mut request::Parts,
         state: &S,
     ) -> Result<Self, Self::Rejection> {
-        let Some(auth) = parts.headers.get(header::AUTHORIZATION) else {
-            return Ok(Self(None));
-        };
+        let auth = parts
+            .headers
+            .get(header::AUTHORIZATION)
+            .ok_or(AuthRejection::None)?;
 
         let st = <Arc<AppState>>::from_ref(state);
         let data =
             serde_json::from_slice::<WithSig<AuthPayload>>(auth.as_bytes()).map_err(|err| {
-                error_response!(
+                AuthRejection::Invalid(error_response!(
                     StatusCode::BAD_REQUEST,
                     "deserialization",
                     "invalid authorization header: {err}",
-                )
+                ))
             })?;
-        st.verify_signed_data(&data)?;
-        Ok(Self(Some(data.signee.user)))
+        st.verify_signed_data(&data)
+            .map_err(AuthRejection::Invalid)?;
+        Ok(Self(data.signee.user))
     }
 }
