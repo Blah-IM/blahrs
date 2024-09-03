@@ -341,18 +341,18 @@ async fn room_create(
     let ruuid = Uuid::new_v4();
 
     let txn = conn.transaction()?;
-    let rid = txn.query_row(
+    txn.execute(
         r"
-        INSERT INTO `room` (`ruuid`, `title`)
-        VALUES (:ruuid, :title)
-        RETURNING `rid`
+        INSERT INTO `room` (`ruuid`, `title`, `attrs`)
+        VALUES (:ruuid, :title, :attrs)
         ",
         named_params! {
             ":ruuid": ruuid,
             ":title": params.signee.payload.title,
+            ":attrs": params.signee.payload.attrs,
         },
-        |row| row.get::<_, u64>(0),
     )?;
+    let rid = txn.last_insert_rowid() as u64;
     let mut insert_user = txn.prepare(
         r"
         INSERT INTO `user` (`userkey`)
