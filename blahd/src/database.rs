@@ -1,7 +1,7 @@
 use std::ops::DerefMut;
-use std::sync::Mutex;
 
 use anyhow::{ensure, Context, Result};
+use parking_lot::Mutex;
 use rusqlite::{params, Connection, OpenFlags};
 
 use crate::config::DatabaseConfig;
@@ -57,7 +57,7 @@ impl Database {
     }
 
     pub fn get(&self) -> impl DerefMut<Target = Connection> + '_ {
-        self.conn.lock().unwrap()
+        self.conn.lock()
     }
 }
 

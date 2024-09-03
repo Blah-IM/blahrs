@@ -1,6 +1,6 @@
 use std::num::NonZeroUsize;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use anyhow::{Context, Result};
@@ -19,6 +19,7 @@ use config::Config;
 use database::Database;
 use ed25519_dalek::SIGNATURE_LENGTH;
 use middleware::{ApiError, OptionalAuth, SignedJson};
+use parking_lot::Mutex;
 use rusqlite::{named_params, params, Connection, OptionalExtension, Row, ToSql};
 use serde::{Deserialize, Serialize};
 use url::Url;
@@ -122,12 +123,7 @@ impl AppState {
                 "invalid timestamp, off by {timestamp_diff}s"
             ));
         }
-        if !self
-            .used_nonces
-            .lock()
-            .unwrap()
-            .try_insert(data.signee.nonce)
-        {
+        if !self.used_nonces.lock().try_insert(data.signee.nonce) {
             return Err(error_response!(
                 StatusCode::BAD_REQUEST,
                 "duplicated_nonce",
@@ -425,7 +421,7 @@ struct Pagination {
 impl Pagination {
     fn effective_page_len(&self, st: &AppState) -> usize {
         self.top
-            .unwrap_or(usize::MAX.try_into().unwrap())
+            .unwrap_or(usize::MAX.try_into().expect("not zero"))
             .min(st.config.server.max_page_len)
             .get()
     }
@@ -524,7 +520,9 @@ async fn room_get_feed(
         {
             let mut query = next_url.query_pairs_mut();
             let ser = serde_urlencoded::Serializer::new(&mut query);
-            next_params.serialize(ser).unwrap();
+            next_params
+                .serialize(ser)
+                .expect("serialization cannot fail");
             query.finish();
         }
         next_url
@@ -737,7 +735,7 @@ async fn room_post_item(
             WHERE `rid` = :rid
             ",
         )?;
-        let listeners = st.event.user_listeners.lock().unwrap();
+        let listeners = st.event.user_listeners.lock();
         let txs = stmt
             .query_map(params![rid], |row| row.get::<_, u64>(0))?
             .filter_map(|ret| match ret {

@@ -12,6 +12,7 @@ dbg_macro = "warn"
 print_stderr = "warn"
 print_stdout = "warn"
 todo = "warn"
+unwrap_used = "warn"
 
 [package]
 name = "blah"

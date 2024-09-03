@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use std::convert::Infallible;
 use std::fmt;
 use std::pin::Pin;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::task::{Context, Poll};
 
 use anyhow::{bail, Context as _, Result};
@@ -12,6 +12,7 @@ use blah::types::{AuthPayload, ChatItem, WithSig};
 use futures_util::future::Either;
 use futures_util::stream::SplitSink;
 use futures_util::{stream_select, SinkExt as _, Stream, StreamExt};
+use parking_lot::Mutex;
 use rusqlite::{params, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use tokio::sync::broadcast;
@@ -81,11 +82,10 @@ struct UserEventReceiver {
 impl Drop for UserEventReceiver {
     fn drop(&mut self) {
         tracing::debug!(%self.uid, "user disconnected");
-        if let Ok(mut map) = self.st.event.user_listeners.lock() {
-            if let Some(tx) = map.get_mut(&self.uid) {
-                if tx.receiver_count() == 1 {
-                    map.remove(&self.uid);
-                }
+        let mut map = self.st.event.user_listeners.lock();
+        if let Some(tx) = map.get_mut(&self.uid) {
+            if tx.receiver_count() == 1 {
+                map.remove(&self.uid);
             }
         }
     }
@@ -133,7 +133,7 @@ pub async fn handle_ws(st: Arc<AppState>, ws: &mut WebSocket) -> Result<Infallib
     tracing::debug!(%uid, "user connected");
 
     let event_rx = {
-        let rx = match st.event.user_listeners.lock().unwrap().entry(uid) {
+        let rx = match st.event.user_listeners.lock().entry(uid) {
             Entry::Occupied(ent) => ent.get().subscribe(),
             Entry::Vacant(ent) => {
                 let (tx, rx) = broadcast::channel(st.config.server.ws_event_queue_len);

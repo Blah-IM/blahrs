@@ -18,8 +18,8 @@ pub struct UserKey(#[serde(with = "hex::serde")] pub [u8; PUBLIC_KEY_LENGTH]);
 impl fmt::Display for UserKey {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut buf = [0u8; PUBLIC_KEY_LENGTH * 2];
-        hex::encode_to_slice(self.0, &mut buf).unwrap();
-        f.write_str(std::str::from_utf8(&buf).unwrap())
+        hex::encode_to_slice(self.0, &mut buf).expect("buf size is correct");
+        f.write_str(std::str::from_utf8(&buf).expect("hex must be UTF-8"))
     }
 }
 
