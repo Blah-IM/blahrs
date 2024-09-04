@@ -2,10 +2,8 @@ const msgFlow = document.querySelector('#msg-flow');
 const userPubkeyDisplay = document.querySelector('#user-pubkey');
 const serverUrlInput = document.querySelector('#server-url');
 const roomsInput = document.querySelector('#rooms');
-const leaveRoomBtn = document.querySelector('#leave-room');
 const joinNewRoomInput = document.querySelector('#join-new-room');
 const chatInput = document.querySelector('#chat');
-const regenKeyBtn = document.querySelector('#regen-key');
 
 let serverUrl = null;
 let curRoom = null;
@@ -316,7 +314,6 @@ async function joinRoom(ruuid) {
 
 async function leaveRoom() {
     try {
-        leaveRoomBtn.disabled = true;
         await signAndPost(`${serverUrl}/room/${curRoom}/admin`, {
             room: curRoom,
             typ: 'remove_member',
@@ -327,8 +324,6 @@ async function leaveRoom() {
     } catch (e) {
         console.error(e);
         log(`failed to leave room: ${e}`);
-    } finally {
-        leaveRoomBtn.disabled = false;
     }
 }
 
@@ -417,6 +412,22 @@ window.onload = async (_) => {
         await connectServer(serverUrlInput.value);
     }
 };
+
+function onButtonClick(selector, handler) {
+    const el = document.querySelector(selector);
+    el.onclick = async () => {
+        try {
+            el.disabled = true;
+            await handler();
+        } finally {
+            el.disabled = false;
+        }
+    };
+}
+onButtonClick('#leave-room', leaveRoom);
+onButtonClick('#regen-key', generateKeypair);
+onButtonClick('#refresh-rooms', async () => await loadRoomList(true));
+
 serverUrlInput.onchange = async (e) => {
     await connectServer(e.target.value);
 };
@@ -425,18 +436,9 @@ chatInput.onkeypress = async (e) => {
         await postChat(chatInput.value);
     }
 };
-regenKeyBtn.onclick = async (_) => {
-    await generateKeypair();
-};
-leaveRoomBtn.onclick = async (_) => {
-    await leaveRoom();
-};
 roomsInput.onchange = async (_) => {
     await enterRoom(roomsInput.value);
 };
 joinNewRoomInput.onchange = async (_) => {
     await joinRoom(joinNewRoomInput.value);
-};
-document.querySelector('#refresh-rooms').onclick = async (_) => {
-    await loadRoomList(true);
 };
