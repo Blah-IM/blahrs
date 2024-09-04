@@ -10,7 +10,7 @@ use axum::http::{header, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use axum_extra::extract::WithRejection;
+use axum_extra::extract::WithRejection as R;
 use blah::types::{
     ChatItem, ChatPayload, CreateRoomPayload, MemberPermission, RoomAdminOp, RoomAdminPayload,
     RoomAttrs, ServerPermission, Signee, UserKey, WithSig,
@@ -171,6 +171,8 @@ async fn main_async(st: AppState) -> Result<()> {
     Ok(())
 }
 
+type RE<T> = R<T, ApiError>;
+
 async fn handle_ws(State(st): ArcState, ws: WebSocketUpgrade) -> Response {
     ws.on_upgrade(move |mut socket| async move {
         match event::handle_ws(st, &mut socket).await {
@@ -215,7 +217,7 @@ enum ListRoomFilter {
 
 async fn room_list(
     st: ArcState,
-    WithRejection(params, _): WithRejection<Query<ListRoomParams>, ApiError>,
+    params: RE<Query<ListRoomParams>>,
     auth: MaybeAuth,
 ) -> Result<Json<RoomList>, ApiError> {
     let pagination = Pagination {
@@ -430,8 +432,8 @@ struct RoomItems {
 
 async fn room_get_item(
     st: ArcState,
-    WithRejection(Path(ruuid), _): WithRejection<Path<Uuid>, ApiError>,
-    WithRejection(Query(pagination), _): WithRejection<Query<Pagination>, ApiError>,
+    R(Path(ruuid), _): RE<Path<Uuid>>,
+    R(Query(pagination), _): RE<Query<Pagination>>,
     auth: MaybeAuth,
 ) -> Result<Json<RoomItems>, ApiError> {
     let (items, skip_token) = {
@@ -448,7 +450,7 @@ async fn room_get_item(
 
 async fn room_get_metadata(
     st: ArcState,
-    WithRejection(Path(ruuid), _): WithRejection<Path<Uuid>, ApiError>,
+    R(Path(ruuid), _): RE<Path<Uuid>>,
     auth: MaybeAuth,
 ) -> Result<Json<RoomMetadata>, ApiError> {
     let (title, attrs) =
@@ -469,8 +471,8 @@ async fn room_get_metadata(
 
 async fn room_get_feed(
     st: ArcState,
-    WithRejection(Path(ruuid), _): WithRejection<Path<Uuid>, ApiError>,
-    Query(pagination): Query<Pagination>,
+    R(Path(ruuid), _): RE<Path<Uuid>>,
+    R(Query(pagination), _): RE<Query<Pagination>>,
 ) -> Result<impl IntoResponse, ApiError> {
     let title;
     let (items, skip_token) = {
@@ -665,7 +667,7 @@ fn query_room_items(
 
 async fn room_post_item(
     st: ArcState,
-    Path(ruuid): Path<Uuid>,
+    R(Path(ruuid), _): RE<Path<Uuid>>,
     SignedJson(chat): SignedJson<ChatPayload>,
 ) -> Result<Json<u64>, ApiError> {
     if ruuid != chat.signee.payload.room {
@@ -757,7 +759,7 @@ async fn room_post_item(
 
 async fn room_admin(
     st: ArcState,
-    Path(ruuid): Path<Uuid>,
+    R(Path(ruuid), _): RE<Path<Uuid>>,
     SignedJson(op): SignedJson<RoomAdminPayload>,
 ) -> Result<StatusCode, ApiError> {
     if ruuid != op.signee.payload.room {
