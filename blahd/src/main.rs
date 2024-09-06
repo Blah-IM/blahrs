@@ -19,7 +19,7 @@ use config::Config;
 use database::Database;
 use ed25519_dalek::SIGNATURE_LENGTH;
 use id::IdExt;
-use middleware::{ApiError, MaybeAuth, ResultExt as _, SignedJson};
+use middleware::{ApiError, Auth, MaybeAuth, ResultExt as _, SignedJson};
 use parking_lot::Mutex;
 use rusqlite::{named_params, params, Connection, OptionalExtension, Row, ToSql};
 use serde::{Deserialize, Serialize};
@@ -147,7 +147,8 @@ async fn main_async(st: AppState) -> Result<()> {
         .route("/room/:rid", get(room_get_metadata))
         // NB. Sync with `feed_url` and `next_url` generation.
         .route("/room/:rid/feed.json", get(room_get_feed))
-        .route("/room/:rid/item", get(room_get_item).post(room_post_item))
+        .route("/room/:rid/item", get(room_item_list).post(room_item_post))
+        .route("/room/:rid/item/:cid/seen", post(room_item_mark_seen))
         .route("/room/:rid/admin", post(room_admin))
         .with_state(st.clone())
         .layer(tower_http::limit::RequestBodyLimitLayer::new(
@@ -258,11 +259,14 @@ async fn room_list(
                         })
                     })
                     .transpose()?;
+                let last_seen_cid =
+                    Some(row.get::<_, Id>("last_seen_cid")?).filter(|cid| cid.0 != 0);
                 Ok(RoomMetadata {
                     rid,
                     title,
                     attrs,
                     last_chat,
+                    last_seen_cid,
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;
@@ -274,7 +278,7 @@ async fn room_list(
     match params.filter {
         ListRoomFilter::Public => query(
             r"
-            SELECT `rid`, `title`, `attrs`,
+            SELECT `rid`, `title`, `attrs`, 0 AS `last_seen_cid`,
                 `cid`, `last_author`.`userkey`, `timestamp`, `nonce`, `sig`, `rich_text`
             FROM `room`
             LEFT JOIN `room_item` USING (`rid`)
@@ -296,7 +300,7 @@ async fn room_list(
             query(
                 r"
                 SELECT
-                    `rid`, `title`, `attrs`,
+                    `rid`, `title`, `attrs`, `last_seen_cid`,
                     `cid`, `last_author`.`userkey`, `timestamp`, `nonce`, `sig`, `rich_text`
                 FROM `user`
                 JOIN `room_member` USING (`uid`)
@@ -431,7 +435,7 @@ struct RoomItems {
     skip_token: Option<Id>,
 }
 
-async fn room_get_item(
+async fn room_item_list(
     st: ArcState,
     R(Path(rid), _): RE<Path<Id>>,
     R(Query(pagination), _): RE<Query<Pagination>>,
@@ -463,6 +467,7 @@ async fn room_get_metadata(
         title,
         attrs,
         last_chat: None,
+        last_seen_cid: None,
     }))
 }
 
@@ -574,9 +579,11 @@ pub struct RoomMetadata {
     pub title: String,
     pub attrs: RoomAttrs,
 
-    /// Optional extra information. Only included by the global room list response.
+    /// Optional extra information. Only included by the room list response.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_chat: Option<WithItemId<ChatItem>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_seen_cid: Option<Id>,
 }
 
 fn get_room_if_readable<T>(
@@ -660,7 +667,7 @@ fn query_room_items(
     Ok((items, skip_token))
 }
 
-async fn room_post_item(
+async fn room_item_post(
     st: ArcState,
     R(Path(rid), _): RE<Path<Id>>,
     SignedJson(chat): SignedJson<ChatPayload>,
@@ -897,4 +904,34 @@ async fn room_leave(st: &AppState, rid: Id, user: UserKey) -> Result<(), ApiErro
 
     txn.commit()?;
     Ok(())
+}
+
+async fn room_item_mark_seen(
+    st: ArcState,
+    R(Path((rid, cid)), _): RE<Path<(Id, u64)>>,
+    Auth(user): Auth,
+) -> Result<StatusCode, ApiError> {
+    let changed = st.db.get().execute(
+        r"
+        UPDATE `room_member`
+        SET `last_seen_cid` = MAX(`last_seen_cid`, :cid)
+        WHERE
+            `rid` = :rid AND
+            `uid` = (SELECT `uid` FROM `user` WHERE `userkey` = :userkey)
+        ",
+        named_params! {
+            ":cid": cid,
+            ":rid": rid,
+            ":userkey": user,
+        },
+    )?;
+
+    if changed != 1 {
+        return Err(error_response!(
+            StatusCode::NOT_FOUND,
+            "not_found",
+            "room does not exists or user is not a room member",
+        ));
+    }
+    Ok(StatusCode::NO_CONTENT)
 }

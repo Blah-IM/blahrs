@@ -10,6 +10,7 @@ let curRoom = null;
 let ws = null;
 let keypair = null;
 let defaultConfig = {};
+let lastCid = null;
 
 function bufToHex(buf) {
     return [...new Uint8Array(buf)]
@@ -192,6 +193,7 @@ async function enterRoom(rid) {
         const { items } = json
         items.reverse();
         for (const chat of items) {
+            lastCid = chat.cid;
             await showChatMsg(chat);
         }
         log('---history---');
@@ -267,10 +269,13 @@ async function loadRoomList(autoJoin) {
             const resp = await fetch(`${serverUrl}/room?filter=${filter}`, await genAuthHeader())
             const json = await resp.json()
             if (resp.status !== 200) throw new Error(`status ${resp.status}: ${json.error.message}`);
-            for (const { rid, title, attrs } of json.rooms) {
+            for (const { rid, title, attrs, last_chat, last_seen_cid } of json.rooms) {
                 const el = document.createElement('option');
                 el.value = rid;
                 el.innerText = `${title} (rid=${rid}, attrs=${attrs})`;
+                if (last_chat !== undefined && last_chat.cid !== last_seen_cid) {
+                    el.innerText += ' (unread)';
+                }
                 targetEl.appendChild(el);
             }
         } catch (err) {
@@ -391,6 +396,19 @@ async function postChat(text) {
     }
 }
 
+async function markSeen() {
+    try {
+        const resp = await fetch(`${serverUrl}/room/${curRoom}/item/${lastCid}/seen`, {
+            method: 'POST',
+            headers: (await genAuthHeader()).headers,
+        })
+        if (!resp.ok) throw new Error(`status ${resp.status}: ${(await resp.json()).error.message}`);
+        log('seen')
+    } catch (err) {
+        log(`failed to mark seen: ${err}`)
+    }
+}
+
 window.onload = async (_) => {
     try {
         const resp = await fetch('./default.json');
@@ -427,6 +445,7 @@ function onButtonClick(selector, handler) {
 onButtonClick('#leave-room', leaveRoom);
 onButtonClick('#regen-key', generateKeypair);
 onButtonClick('#refresh-rooms', async () => await loadRoomList(true));
+onButtonClick('#mark-seen', markSeen);
 
 serverUrlInput.onchange = async (e) => {
     await connectServer(e.target.value);

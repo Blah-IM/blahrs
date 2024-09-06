@@ -28,12 +28,12 @@ paths:
             For "public", it returns all public rooms on the server.
             For "joined", `Authorization` must be provided and it will return
             rooms user have joined.
-        page_len:
+        top:
           in: query
           description:
             The maximum number of items returned in each page. This is only an
             advice and server can clamp it to a smaller value.
-        page_token:
+        skipToken:
           in: query
           description:
             The page token returned from a previous list response to fetch the
@@ -41,7 +41,7 @@ paths:
             should be included (as the same value) for each page fetch.
       headers:
         Authorization:
-          description: Proof of membership for private rooms. Required if `joined` is true.
+          description: Proof of membership for private rooms. Required if `filter=joined`.
           required: false
           schema:
             $ret: WithSig<AuthPayload>
@@ -49,7 +49,7 @@ paths:
         200:
           content:
             application/json:
-              $ref: '#/components/schema/ListRoom'
+              $ref: '#/components/schema/RoomList'
         401:
           description: Missing or invalid Authorization header.
           content:
@@ -193,6 +193,29 @@ paths:
             application/json:
               $ref: '#/components/schemas/ApiError'
 
+  /room/{rid}/item/{cid}/seen:
+    post:
+      summary: Mark item {cid} in room {rid} seen by the current user.
+      description:
+        Server will enforce that last seen item does not go backward. Marking
+        an older item seen or sending the same request multiple times will be a
+        no-op.
+      headers:
+        Authorization:
+          description: Proof of membership for private rooms.
+          schema:
+            $ret: WithSig<AuthPayload>
+      responses:
+        204:
+          description: Operation completed.
+        404:
+          description: |
+            Room does not exist or the user is not in the room.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+
   /room/{rid}/admin:
     post:
       summary: Room management
@@ -261,6 +284,8 @@ components:
           type: int64
         last_chat:
           $ref: 'WithItemId<WithSig<ChatPayload>>'
+        last_seen_cid:
+          type: string
 
     RoomMetadata:
       type: object

@@ -17,10 +17,13 @@ CREATE TABLE IF NOT EXISTS `room_member` (
     `rid`           INTEGER NOT NULL REFERENCES `room` ON DELETE CASCADE,
     `uid`           INTEGER NOT NULL REFERENCES `user` ON DELETE RESTRICT,
     `permission`    INTEGER NOT NULL,
+    `last_seen_cid` INTEGER NOT NULL REFERENCES `room_item` (`cid`) ON DELETE NO ACTION
+                    DEFAULT 0,
     PRIMARY KEY (`rid`, `uid`)
 ) STRICT;
 
-CREATE INDEX IF NOT EXISTS `member_room` ON `room_member` (`uid` ASC, `rid` ASC);
+CREATE INDEX IF NOT EXISTS `ix_member_room` ON `room_member`
+    (`uid` ASC, `rid` ASC, `permission`, `last_seen_cid`);
 
 CREATE TABLE IF NOT EXISTS `room_item` (
     `cid`       INTEGER NOT NULL PRIMARY KEY,
