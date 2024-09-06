@@ -179,7 +179,7 @@ paths:
         200:
           content:
             application/json:
-              type: integer
+              type: string
               description: Created chat id (cid).
         400:
           description: Body is invalid or fails the verification.

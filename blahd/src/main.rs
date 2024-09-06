@@ -18,6 +18,7 @@ use blah::types::{
 use config::Config;
 use database::Database;
 use ed25519_dalek::SIGNATURE_LENGTH;
+use id::IdExt;
 use middleware::{ApiError, MaybeAuth, ResultExt as _, SignedJson};
 use parking_lot::Mutex;
 use rusqlite::{named_params, params, Connection, OptionalExtension, Row, ToSql};
@@ -30,6 +31,7 @@ mod middleware;
 mod config;
 mod database;
 mod event;
+mod id;
 mod utils;
 
 /// Blah Chat Server
@@ -356,17 +358,18 @@ async fn room_create(
     };
 
     let txn = conn.transaction()?;
+    let rid = Id::gen();
     txn.execute(
         r"
-        INSERT INTO `room` (`title`, `attrs`)
-        VALUES (:title, :attrs)
+        INSERT INTO `room` (`rid`, `title`, `attrs`)
+        VALUES (:rid, :title, :attrs)
         ",
         named_params! {
+            ":rid": rid,
             ":title": params.signee.payload.title,
             ":attrs": params.signee.payload.attrs,
         },
     )?;
-    let rid = Id(txn.last_insert_rowid());
     let mut insert_user = txn.prepare(
         r"
         INSERT INTO `user` (`userkey`)
@@ -664,7 +667,7 @@ async fn room_post_item(
     st: ArcState,
     R(Path(rid), _): RE<Path<Id>>,
     SignedJson(chat): SignedJson<ChatPayload>,
-) -> Result<Json<u64>, ApiError> {
+) -> Result<Json<Id>, ApiError> {
     if rid != chat.signee.payload.room {
         return Err(error_response!(
             StatusCode::BAD_REQUEST,
@@ -705,13 +708,14 @@ async fn room_post_item(
             ));
         };
 
-        let cid = conn.query_row(
+        let cid = Id::gen();
+        conn.execute(
             r"
-            INSERT INTO `room_item` (`rid`, `uid`, `timestamp`, `nonce`, `sig`, `rich_text`)
-            VALUES (:rid, :uid, :timestamp, :nonce, :sig, :rich_text)
-            RETURNING `cid`
+            INSERT INTO `room_item` (`cid`, `rid`, `uid`, `timestamp`, `nonce`, `sig`, `rich_text`)
+            VALUES (:cid, :rid, :uid, :timestamp, :nonce, :sig, :rich_text)
             ",
             named_params! {
+                ":cid": cid,
                 ":rid": rid,
                 ":uid": uid,
                 ":timestamp": chat.signee.timestamp,
@@ -719,7 +723,6 @@ async fn room_post_item(
                 ":rich_text": &chat.signee.payload.rich_text,
                 ":sig": chat.sig,
             },
-            |row| row.get::<_, u64>(0),
         )?;
 
         // FIXME: Optimize this to not traverses over all members.
