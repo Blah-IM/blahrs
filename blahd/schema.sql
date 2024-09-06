@@ -8,8 +8,7 @@ CREATE TABLE IF NOT EXISTS `user` (
 ) STRICT;
 
 CREATE TABLE IF NOT EXISTS `room` (
-    `rid`       INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
-    `ruuid`     BLOB NOT NULL UNIQUE,
+    `rid`       INTEGER NOT NULL PRIMARY KEY,
     `title`     TEXT NOT NULL,
     `attrs`     INTEGER NOT NULL
 ) STRICT;

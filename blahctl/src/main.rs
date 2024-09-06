@@ -5,10 +5,9 @@ use std::{fs, io};
 use anyhow::{Context, Result};
 use blah::bitflags;
 use blah::types::{
-    get_timestamp, ChatPayload, CreateRoomPayload, MemberPermission, RichText, RoomAttrs,
+    get_timestamp, ChatPayload, CreateRoomPayload, Id, MemberPermission, RichText, RoomAttrs,
     RoomMember, RoomMemberList, ServerPermission, UserKey, WithSig,
 };
-use blah::uuid::Uuid;
 use ed25519_dalek::pkcs8::spki::der::pem::LineEnding;
 use ed25519_dalek::pkcs8::{DecodePrivateKey, DecodePublicKey, EncodePrivateKey, EncodePublicKey};
 use ed25519_dalek::{SigningKey, VerifyingKey, PUBLIC_KEY_LENGTH};
@@ -94,7 +93,7 @@ enum ApiCommand {
         private_key_file: PathBuf,
 
         #[arg(long)]
-        room: Uuid,
+        room: i64,
 
         #[arg(long)]
         text: String,
@@ -249,7 +248,7 @@ async fn main_api(api_url: Url, command: ApiCommand) -> Result<()> {
         } => {
             let key = load_signing_key(&private_key_file)?;
             let payload = ChatPayload {
-                room,
+                room: Id(room),
                 rich_text: RichText::from(text),
             };
             let payload = WithSig::sign(&key, get_timestamp(), &mut OsRng, payload)?;

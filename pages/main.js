@@ -168,13 +168,13 @@ async function genAuthHeader() {
     };
 }
 
-async function enterRoom(ruuid) {
-    log(`loading room: ${ruuid}`);
-    curRoom = ruuid;
-    roomsInput.value = ruuid;
+async function enterRoom(rid) {
+    log(`loading room: ${rid}`);
+    curRoom = rid;
+    roomsInput.value = rid;
 
     genAuthHeader()
-    .then(opts => fetch(`${serverUrl}/room/${ruuid}`, opts))
+    .then(opts => fetch(`${serverUrl}/room/${rid}`, opts))
     .then(async (resp) => [resp.status, await resp.json()])
     .then(async ([status, json]) => {
         if (status !== 200) throw new Error(`status ${status}: ${json.error.message}`);
@@ -185,7 +185,7 @@ async function enterRoom(ruuid) {
     });
 
     genAuthHeader()
-    .then(opts => fetch(`${serverUrl}/room/${ruuid}/item`, opts))
+    .then(opts => fetch(`${serverUrl}/room/${rid}/item`, opts))
     .then(async (resp) => { return [resp.status, await resp.json()]; })
     .then(async ([status, json]) => {
         if (status !== 200) throw new Error(`status ${status}: ${json.error.message}`);
@@ -267,10 +267,10 @@ async function loadRoomList(autoJoin) {
             const resp = await fetch(`${serverUrl}/room?filter=${filter}`, await genAuthHeader())
             const json = await resp.json()
             if (resp.status !== 200) throw new Error(`status ${resp.status}: ${json.error.message}`);
-            for (const { ruuid, title, attrs } of json.rooms) {
+            for (const { rid, title, attrs } of json.rooms) {
                 const el = document.createElement('option');
-                el.value = ruuid;
-                el.innerText = `${title} (uuid=${ruuid}, attrs=${attrs})`;
+                el.value = rid;
+                el.innerText = `${title} (rid=${rid}, attrs=${attrs})`;
                 targetEl.appendChild(el);
             }
         } catch (err) {
@@ -291,19 +291,19 @@ async function loadRoomList(autoJoin) {
     loadInto(joinNewRoomInput, 'public')
 }
 
-async function joinRoom(ruuid) {
+async function joinRoom(rid) {
     try {
         joinNewRoomInput.disabled = true;
-        await signAndPost(`${serverUrl}/room/${ruuid}/admin`, {
+        await signAndPost(`${serverUrl}/room/${rid}/admin`, {
             // sorted fields.
             permission: 1, // POST_CHAT
-            room: ruuid,
+            room: rid,
             typ: 'add_member',
             user: await getUserPubkey(),
         });
         log('joined room');
         await loadRoomList(false)
-        await enterRoom(ruuid);
+        await enterRoom(rid);
     } catch (e) {
         console.error(e);
         log(`failed to join room: ${e}`);

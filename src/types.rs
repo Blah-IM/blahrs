@@ -9,7 +9,20 @@ use ed25519_dalek::{
 };
 use rand_core::RngCore;
 use serde::{de, Deserialize, Deserializer, Serialize, Serializer};
-use uuid::Uuid;
+use serde_with::{serde_as, DisplayFromStr};
+
+/// An opaque server-specific ID for room, chat item, and etc.
+/// It's currently serialized as a string for JavaScript's convenience.
+#[serde_as]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct Id(#[serde_as(as = "DisplayFromStr")] pub i64);
+
+impl fmt::Display for Id {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.fmt(f)
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(transparent)]
@@ -82,7 +95,7 @@ impl<T: Serialize> WithSig<T> {
 #[serde(tag = "typ", rename = "chat")]
 pub struct ChatPayload {
     pub rich_text: RichText,
-    pub room: Uuid,
+    pub room: Id,
 }
 
 /// Ref: <https://github.com/Blah-IM/Weblah/blob/a3fa0f265af54c846f8d65f42aa4409c8dba9dd9/src/lib/richText.ts>
@@ -329,7 +342,7 @@ pub struct AuthPayload {}
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "typ", rename_all = "snake_case")]
 pub struct RoomAdminPayload {
-    pub room: Uuid,
+    pub room: Id,
     #[serde(flatten)]
     pub op: RoomAdminOp,
 }
@@ -384,6 +397,18 @@ mod sql_impl {
     use rusqlite::{Result, ToSql};
 
     use super::*;
+
+    impl ToSql for Id {
+        fn to_sql(&self) -> Result<ToSqlOutput<'_>> {
+            self.0.to_sql()
+        }
+    }
+
+    impl FromSql for Id {
+        fn column_result(value: ValueRef<'_>) -> FromSqlResult<Self> {
+            i64::column_result(value).map(Self)
+        }
+    }
 
     impl ToSql for UserKey {
         fn to_sql(&self) -> Result<ToSqlOutput<'_>> {
@@ -441,6 +466,8 @@ mod sql_impl {
 
 #[cfg(test)]
 mod tests {
+    use expect_test::expect;
+
     use super::*;
 
     #[test]
@@ -454,16 +481,17 @@ mod tests {
             &mut fake_rng,
             ChatPayload {
                 rich_text: RichText::from("hello"),
-                room: Uuid::nil(),
+                room: Id(42),
             },
         )
         .unwrap();
 
         let json = serde_jcs::to_string(&item).unwrap();
-        assert_eq!(
-            json,
-            r#"{"sig":"5e52985dc9e43a77267f0b383a8223af96f36e83c180a36da627dfac6504b2bb4c6b80c9903a6c3a0bbc742718466d72af4407a8e74d41af5cb0137cf3798d08","signee":{"nonce":66,"payload":{"rich_text":["hello"],"room":"00000000-0000-0000-0000-000000000000","typ":"chat"},"timestamp":3735928559,"user":"2152f8d19b791d24453242e15f2eab6cb7cffa7b6a5ed30097960e069881db12"}}"#
-        );
+        let expect = expect![[
+            r#"{"sig":"18ee190722bebfd438c82f34890540d91578b4ba9f6c0c6011cc4fd751a321e32e9442d00dad1920799c54db011694c72a9ba993b408922e9997119209aa5e09","signee":{"nonce":66,"payload":{"rich_text":["hello"],"room":"42","typ":"chat"},"timestamp":3735928559,"user":"2152f8d19b791d24453242e15f2eab6cb7cffa7b6a5ed30097960e069881db12"}}"#
+        ]];
+        expect.assert_eq(&json);
+
         let roundtrip_item = serde_json::from_str::<WithSig<ChatPayload>>(&json).unwrap();
         // assert_eq!(roundtrip_item, item);
         roundtrip_item.verify().unwrap();
@@ -503,7 +531,7 @@ mod tests {
     #[test]
     fn room_admin_serde() {
         let data = RoomAdminPayload {
-            room: Uuid::nil(),
+            room: Id(42),
             op: RoomAdminOp::AddMember {
                 permission: MemberPermission::POST_CHAT,
                 user: UserKey([0x42; PUBLIC_KEY_LENGTH]),
@@ -511,11 +539,11 @@ mod tests {
         };
         let raw = serde_jcs::to_string(&data).unwrap();
 
-        assert_eq!(
-            raw,
-            r#"{"permission":1,"room":"00000000-0000-0000-0000-000000000000","typ":"add_member","user":"4242424242424242424242424242424242424242424242424242424242424242"}"#
-        );
-        let got = serde_json::from_str::<RoomAdminPayload>(&raw).unwrap();
-        assert_eq!(got, data);
+        let expect = expect![[
+            r#"{"permission":1,"room":"42","typ":"add_member","user":"4242424242424242424242424242424242424242424242424242424242424242"}"#
+        ]];
+        expect.assert_eq(&raw);
+        let roundtrip = serde_json::from_str::<RoomAdminPayload>(&raw).unwrap();
+        assert_eq!(roundtrip, data);
     }
 }

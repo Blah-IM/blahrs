@@ -82,14 +82,14 @@ paths:
           content:
             application/json:
               type: string
-              description: UUID of the newly created room (ruuid).
+              description: Id of the newly created room (rid).
         403:
           description: The user does not have permission to create room.
           content:
             application/json:
               $ref: '#/components/schemas/ApiError'
 
-  /room/{ruuid}:
+  /room/{rid}:
     get:
       summary: Get room metadata
       responses:
@@ -107,9 +107,9 @@ paths:
                 $ref: '#/components/schemas/ApiError'
 
 
-  /room/{ruuid}/feed.json:
+  /room/{rid}/feed.json:
     get:
-      summary: JSON feed of room {ruuid}, which must be public readable
+      summary: JSON feed of room {rid}, which must be public readable
       description: For human and feed reader consumption only.
       responses:
         200:
@@ -122,9 +122,9 @@ paths:
             application/json:
               $ref: '#/components/schemas/ApiError'
 
-  /room/{ruuid}/item:
+  /room/{rid}/item:
     get:
-      summary: Get chat history for room {ruuid}
+      summary: Get chat history for room {rid}
       description: |
         Return chat items in reversed time order, up to PAGE_LEN items.
         The last (oldest) chat id can be used as query parameter for the next
@@ -159,7 +159,7 @@ paths:
               $ref: '#/components/schemas/ApiError'
 
     post:
-      summary: Post a chat in room {ruuid}
+      summary: Post a chat in room {rid}
       requestBody:
         content:
           application/json:
@@ -193,7 +193,7 @@ paths:
             application/json:
               $ref: '#/components/schemas/ApiError'
 
-  /room/{ruuid}/admin:
+  /room/{rid}/admin:
     post:
       summary: Room management
       requestBody:
@@ -251,9 +251,9 @@ components:
 
     RoomMetadataForList:
       type: object
-      required: ['ruuid', 'title', 'attrs']
+      required: ['rid', 'title', 'attrs']
       properties:
-        ruuid:
+        rid:
           type: string
         title:
           type: string
@@ -265,7 +265,7 @@ components:
     RoomMetadata:
       type: object
       properties:
-        ruuid:
+        rid:
           type: string
         title:
           type: string

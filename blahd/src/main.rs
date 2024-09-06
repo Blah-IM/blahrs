@@ -12,7 +12,7 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use axum_extra::extract::WithRejection as R;
 use blah::types::{
-    ChatItem, ChatPayload, CreateRoomPayload, MemberPermission, RoomAdminOp, RoomAdminPayload,
+    ChatItem, ChatPayload, CreateRoomPayload, Id, MemberPermission, RoomAdminOp, RoomAdminPayload,
     RoomAttrs, ServerPermission, Signee, UserKey, WithSig,
 };
 use config::Config;
@@ -24,7 +24,6 @@ use rusqlite::{named_params, params, Connection, OptionalExtension, Row, ToSql};
 use serde::{Deserialize, Serialize};
 use url::Url;
 use utils::ExpiringSet;
-use uuid::Uuid;
 
 #[macro_use]
 mod middleware;
@@ -143,11 +142,11 @@ async fn main_async(st: AppState) -> Result<()> {
         .route("/ws", get(handle_ws))
         .route("/room", get(room_list))
         .route("/room/create", post(room_create))
-        .route("/room/:ruuid", get(room_get_metadata))
+        .route("/room/:rid", get(room_get_metadata))
         // NB. Sync with `feed_url` and `next_url` generation.
-        .route("/room/:ruuid/feed.json", get(room_get_feed))
-        .route("/room/:ruuid/item", get(room_get_item).post(room_post_item))
-        .route("/room/:ruuid/admin", post(room_admin))
+        .route("/room/:rid/feed.json", get(room_get_feed))
+        .route("/room/:rid/item", get(room_get_item).post(room_post_item))
+        .route("/room/:rid/admin", post(room_admin))
         .with_state(st.clone())
         .layer(tower_http::limit::RequestBodyLimitLayer::new(
             st.config.server.max_request_len,
@@ -195,7 +194,7 @@ async fn handle_ws(State(st): ArcState, ws: WebSocketUpgrade) -> Response {
 struct RoomList {
     rooms: Vec<RoomMetadata>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    skip_token: Option<u64>,
+    skip_token: Option<Id>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -235,8 +234,8 @@ async fn room_list(
             .prepare(sql)?
             .query_map(params, |row| {
                 // TODO: Extract this into a function.
-                last_rid = Some(row.get::<_, u64>("rid")?);
-                let ruuid = row.get("ruuid")?;
+                let rid = row.get("rid")?;
+                last_rid = Some(rid);
                 let title = row.get("title")?;
                 let attrs = row.get("attrs")?;
                 let last_chat = row
@@ -250,14 +249,14 @@ async fn room_list(
                                 user,
                                 payload: ChatPayload {
                                     rich_text: row.get("rich_text")?,
-                                    room: ruuid,
+                                    room: rid,
                                 },
                             },
                         })
                     })
                     .transpose()?;
                 Ok(RoomMetadata {
-                    ruuid,
+                    rid,
                     title,
                     attrs,
                     last_chat,
@@ -271,7 +270,7 @@ async fn room_list(
     match params.filter {
         ListRoomFilter::Public => query(
             r"
-            SELECT `rid`, `ruuid`, `title`, `attrs`,
+            SELECT `rid`, `title`, `attrs`,
                 `last_author`.`userkey` AS `userkey`, `timestamp`, `nonce`, `sig`, `rich_text`
             FROM `room`
             LEFT JOIN `room_item` USING (`rid`)
@@ -293,7 +292,7 @@ async fn room_list(
             query(
                 r"
                 SELECT
-                    `rid`, `ruuid`, `title`, `attrs`,
+                    `rid`, `title`, `attrs`,
                     `last_author`.`userkey`, `timestamp`, `nonce`, `sig`, `rich_text`
                 FROM `user`
                 JOIN `room_member` USING (`uid`)
@@ -320,7 +319,7 @@ async fn room_list(
 async fn room_create(
     st: ArcState,
     SignedJson(params): SignedJson<CreateRoomPayload>,
-) -> Result<Json<Uuid>, ApiError> {
+) -> Result<Json<Id>, ApiError> {
     let members = &params.signee.payload.members.0;
     if !members
         .iter()
@@ -356,21 +355,18 @@ async fn room_create(
         ));
     };
 
-    let ruuid = Uuid::new_v4();
-
     let txn = conn.transaction()?;
     txn.execute(
         r"
-        INSERT INTO `room` (`ruuid`, `title`, `attrs`)
-        VALUES (:ruuid, :title, :attrs)
+        INSERT INTO `room` (`title`, `attrs`)
+        VALUES (:title, :attrs)
         ",
         named_params! {
-            ":ruuid": ruuid,
             ":title": params.signee.payload.title,
             ":attrs": params.signee.payload.attrs,
         },
     )?;
-    let rid = txn.last_insert_rowid() as u64;
+    let rid = Id(txn.last_insert_rowid());
     let mut insert_user = txn.prepare(
         r"
         INSERT INTO `user` (`userkey`)
@@ -398,7 +394,7 @@ async fn room_create(
     drop(insert_user);
     txn.commit()?;
 
-    Ok(Json(ruuid))
+    Ok(Json(rid))
 }
 
 /// Pagination query parameters.
@@ -432,14 +428,14 @@ struct RoomItems {
 
 async fn room_get_item(
     st: ArcState,
-    R(Path(ruuid), _): RE<Path<Uuid>>,
+    R(Path(rid), _): RE<Path<Id>>,
     R(Query(pagination), _): RE<Query<Pagination>>,
     auth: MaybeAuth,
 ) -> Result<Json<RoomItems>, ApiError> {
     let (items, skip_token) = {
         let conn = st.db.get();
-        get_room_if_readable(&conn, ruuid, auth.into_optional()?.as_ref(), |_row| Ok(()))?;
-        query_room_items(&st, &conn, ruuid, pagination)?
+        get_room_if_readable(&conn, rid, auth.into_optional()?.as_ref(), |_row| Ok(()))?;
+        query_room_items(&st, &conn, rid, pagination)?
     };
     let items = items.into_iter().map(|(_, item)| item).collect();
     Ok(Json(RoomItems {
@@ -450,11 +446,11 @@ async fn room_get_item(
 
 async fn room_get_metadata(
     st: ArcState,
-    R(Path(ruuid), _): RE<Path<Uuid>>,
+    R(Path(rid), _): RE<Path<Id>>,
     auth: MaybeAuth,
 ) -> Result<Json<RoomMetadata>, ApiError> {
     let (title, attrs) =
-        get_room_if_readable(&st.db.get(), ruuid, auth.into_optional()?.as_ref(), |row| {
+        get_room_if_readable(&st.db.get(), rid, auth.into_optional()?.as_ref(), |row| {
             Ok((
                 row.get::<_, String>("title")?,
                 row.get::<_, RoomAttrs>("attrs")?,
@@ -462,7 +458,7 @@ async fn room_get_metadata(
         })?;
 
     Ok(Json(RoomMetadata {
-        ruuid,
+        rid,
         title,
         attrs,
         last_chat: None,
@@ -471,14 +467,14 @@ async fn room_get_metadata(
 
 async fn room_get_feed(
     st: ArcState,
-    R(Path(ruuid), _): RE<Path<Uuid>>,
+    R(Path(rid), _): RE<Path<Id>>,
     R(Query(pagination), _): RE<Query<Pagination>>,
 ) -> Result<impl IntoResponse, ApiError> {
     let title;
     let (items, skip_token) = {
         let conn = st.db.get();
-        title = get_room_if_readable(&conn, ruuid, None, |row| row.get::<_, String>("title"))?;
-        query_room_items(&st, &conn, ruuid, pagination)?
+        title = get_room_if_readable(&conn, rid, None, |row| row.get::<_, String>("title"))?;
+        query_room_items(&st, &conn, rid, pagination)?
     };
 
     let items = items
@@ -506,7 +502,7 @@ async fn room_get_feed(
         .config
         .server
         .base_url
-        .join(&format!("/room/{ruuid}/feed.json"))
+        .join(&format!("/room/{rid}/feed.json"))
         .expect("base_url must be valid");
     let next_url = skip_token.map(|skip_token| {
         let next_params = Pagination {
@@ -573,7 +569,7 @@ struct FeedItemExtra {
 
 #[derive(Debug, Serialize)]
 pub struct RoomMetadata {
-    pub ruuid: Uuid,
+    pub rid: Id,
     pub title: String,
     pub attrs: RoomAttrs,
 
@@ -584,15 +580,15 @@ pub struct RoomMetadata {
 
 fn get_room_if_readable<T>(
     conn: &rusqlite::Connection,
-    ruuid: Uuid,
+    rid: Id,
     user: Option<&UserKey>,
     f: impl FnOnce(&Row<'_>) -> rusqlite::Result<T>,
 ) -> Result<T, ApiError> {
     conn.query_row(
         r"
-        SELECT `rid`, `title`, `attrs`
+        SELECT `title`, `attrs`
         FROM `room`
-        WHERE `ruuid` = :ruuid AND
+        WHERE `rid` = :rid AND
             ((`attrs` & :perm) = :perm OR
             EXISTS(SELECT 1
                 FROM `room_member`
@@ -601,8 +597,8 @@ fn get_room_if_readable<T>(
                     `userkey` = :userkey))
         ",
         named_params! {
+            ":rid": rid,
             ":perm": RoomAttrs::PUBLIC_READABLE,
-            ":ruuid": ruuid,
             ":userkey": user,
         },
         f,
@@ -618,17 +614,16 @@ type ChatItemWithId = (u64, ChatItem);
 fn query_room_items(
     st: &AppState,
     conn: &Connection,
-    ruuid: Uuid,
+    rid: Id,
     pagination: Pagination,
 ) -> Result<(Vec<ChatItemWithId>, Option<u64>), ApiError> {
     let page_len = pagination.effective_page_len(st);
     let mut stmt = conn.prepare(
         r"
         SELECT `cid`, `timestamp`, `nonce`, `sig`, `userkey`, `sig`, `rich_text`
-        FROM `room`
-        JOIN `room_item` USING (`rid`)
+        FROM `room_item`
         JOIN `user` USING (`uid`)
-        WHERE `ruuid` = :ruuid AND
+        WHERE `rid` = :rid AND
             (:before_cid IS NULL OR `cid` < :before_cid)
         ORDER BY `cid` DESC
         LIMIT :limit
@@ -637,7 +632,7 @@ fn query_room_items(
     let items = stmt
         .query_and_then(
             named_params! {
-                ":ruuid": ruuid,
+                ":rid": rid,
                 ":before_cid": pagination.skip_token,
                 ":limit": page_len,
             },
@@ -650,7 +645,7 @@ fn query_room_items(
                         timestamp: row.get("timestamp")?,
                         user: row.get("userkey")?,
                         payload: ChatPayload {
-                            room: ruuid,
+                            room: rid,
                             rich_text: row.get("rich_text")?,
                         },
                     },
@@ -667,10 +662,10 @@ fn query_room_items(
 
 async fn room_post_item(
     st: ArcState,
-    R(Path(ruuid), _): RE<Path<Uuid>>,
+    R(Path(rid), _): RE<Path<Id>>,
     SignedJson(chat): SignedJson<ChatPayload>,
 ) -> Result<Json<u64>, ApiError> {
-    if ruuid != chat.signee.payload.room {
+    if rid != chat.signee.payload.room {
         return Err(error_response!(
             StatusCode::BAD_REQUEST,
             "invalid_request",
@@ -680,25 +675,28 @@ async fn room_post_item(
 
     let (cid, txs) = {
         let conn = st.db.get();
-        let Some((rid, uid)) = conn
+        let Some((uid, _perm)) = conn
             .query_row(
                 r"
-                SELECT `rid`, `uid`
-                FROM `room`
-                JOIN `room_member` USING (`rid`)
+                SELECT `uid`, `room_member`.`permission`
+                FROM `room_member`
                 JOIN `user` USING (`uid`)
-                WHERE `ruuid` = :ruuid AND
-                    `userkey` = :userkey AND
-                    (`room_member`.`permission` & :perm) = :perm
+                WHERE `rid` = :rid AND
+                    `userkey` = :userkey
                 ",
                 named_params! {
-                    ":ruuid": ruuid,
+                    ":rid": rid,
                     ":userkey": &chat.signee.user,
-                    ":perm": MemberPermission::POST_CHAT,
                 },
-                |row| Ok((row.get::<_, u64>("rid")?, row.get::<_, u64>("uid")?)),
+                |row| {
+                    Ok((
+                        row.get::<_, u64>("uid")?,
+                        row.get::<_, MemberPermission>("permission")?,
+                    ))
+                },
             )
             .optional()?
+            .filter(|(_, perm)| perm.contains(MemberPermission::POST_CHAT))
         else {
             return Err(error_response!(
                 StatusCode::FORBIDDEN,
@@ -759,10 +757,10 @@ async fn room_post_item(
 
 async fn room_admin(
     st: ArcState,
-    R(Path(ruuid), _): RE<Path<Uuid>>,
+    R(Path(rid), _): RE<Path<Id>>,
     SignedJson(op): SignedJson<RoomAdminPayload>,
 ) -> Result<StatusCode, ApiError> {
-    if ruuid != op.signee.payload.room {
+    if rid != op.signee.payload.room {
         return Err(error_response!(
             StatusCode::BAD_REQUEST,
             "invalid_request",
@@ -786,7 +784,7 @@ async fn room_admin(
                     "invalid permission",
                 ));
             }
-            room_join(&st, ruuid, user, permission).await?;
+            room_join(&st, rid, user, permission).await?;
         }
         RoomAdminOp::RemoveMember { user } => {
             if user != op.signee.user {
@@ -796,7 +794,7 @@ async fn room_admin(
                     "only self-removing is implemented yet",
                 ));
             }
-            room_leave(&st, ruuid, user).await?;
+            room_leave(&st, rid, user).await?;
         }
     }
 
@@ -805,34 +803,32 @@ async fn room_admin(
 
 async fn room_join(
     st: &AppState,
-    ruuid: Uuid,
+    rid: Id,
     user: UserKey,
     permission: MemberPermission,
 ) -> Result<(), ApiError> {
     let mut conn = st.db.get();
     let txn = conn.transaction()?;
-    let Some(rid) = txn
+    let is_public_joinable = txn
         .query_row(
             r"
-            SELECT `rid`
+            SELECT `attrs`
             FROM `room`
-            WHERE `ruuid` = :ruuid AND
-                (`room`.`attrs` & :joinable) = :joinable
+            WHERE `rid` = ?
             ",
-            named_params! {
-                ":ruuid": ruuid,
-                ":joinable": RoomAttrs::PUBLIC_JOINABLE,
-            },
-            |row| row.get::<_, u64>("rid"),
+            params![rid],
+            |row| row.get::<_, RoomAttrs>(0),
         )
         .optional()?
-    else {
+        .is_some_and(|attrs| attrs.contains(RoomAttrs::PUBLIC_JOINABLE));
+    if !is_public_joinable {
         return Err(error_response!(
             StatusCode::FORBIDDEN,
             "permission_denied",
             "room does not exists or user is not allowed to join this room",
         ));
-    };
+    }
+
     txn.execute(
         r"
         INSERT INTO `user` (`userkey`)
@@ -860,25 +856,24 @@ async fn room_join(
     Ok(())
 }
 
-async fn room_leave(st: &AppState, ruuid: Uuid, user: UserKey) -> Result<(), ApiError> {
+async fn room_leave(st: &AppState, rid: Id, user: UserKey) -> Result<(), ApiError> {
     let mut conn = st.db.get();
     let txn = conn.transaction()?;
 
-    let Some((rid, uid)) = txn
+    let Some(uid) = txn
         .query_row(
             r"
-            SELECT `rid`, `uid`
+            SELECT `uid`
             FROM `room_member`
-            JOIN `room` USING (`rid`)
             JOIN `user` USING (`uid`)
-            WHERE `ruuid` = :ruuid AND
+            WHERE `rid` = :rid AND
                 `userkey` = :userkey
             ",
             named_params! {
-                ":ruuid": ruuid,
+                ":rid": rid,
                 ":userkey": user,
             },
-            |row| Ok((row.get::<_, u64>("rid")?, row.get::<_, u64>("uid")?)),
+            |row| row.get::<_, u64>("uid"),
         )
         .optional()?
     else {
