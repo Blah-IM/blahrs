@@ -13,7 +13,7 @@ use axum::{Json, Router};
 use axum_extra::extract::WithRejection as R;
 use blah::types::{
     ChatItem, ChatPayload, CreateRoomPayload, Id, MemberPermission, RoomAdminOp, RoomAdminPayload,
-    RoomAttrs, ServerPermission, Signee, UserKey, WithSig,
+    RoomAttrs, ServerPermission, Signee, UserKey, WithItemId, WithSig,
 };
 use config::Config;
 use database::Database;
@@ -205,7 +205,7 @@ struct ListRoomParams {
     filter: ListRoomFilter,
     // Workaround: serde(flatten) breaks deserialization
     // See: https://github.com/nox/serde_urlencoded/issues/33
-    skip_token: Option<u64>,
+    skip_token: Option<Id>,
     top: Option<NonZeroUsize>,
 }
 
@@ -226,10 +226,9 @@ async fn room_list(
         top: params.top,
     };
     let page_len = pagination.effective_page_len(&st);
-    let start_rid = pagination.skip_token.unwrap_or(0);
+    let start_rid = pagination.skip_token.unwrap_or(Id(0));
 
     let query = |sql: &str, params: &[(&str, &dyn ToSql)]| -> Result<RoomList, ApiError> {
-        let mut last_rid = None;
         let rooms = st
             .db
             .get()
@@ -237,21 +236,23 @@ async fn room_list(
             .query_map(params, |row| {
                 // TODO: Extract this into a function.
                 let rid = row.get("rid")?;
-                last_rid = Some(rid);
                 let title = row.get("title")?;
                 let attrs = row.get("attrs")?;
                 let last_chat = row
-                    .get::<_, Option<UserKey>>("userkey")?
-                    .map(|user| {
-                        Ok::<_, rusqlite::Error>(ChatItem {
-                            sig: row.get("sig")?,
-                            signee: Signee {
-                                nonce: row.get("nonce")?,
-                                timestamp: row.get("timestamp")?,
-                                user,
-                                payload: ChatPayload {
-                                    rich_text: row.get("rich_text")?,
-                                    room: rid,
+                    .get::<_, Option<Id>>("cid")?
+                    .map(|cid| {
+                        Ok::<_, rusqlite::Error>(WithItemId {
+                            cid,
+                            item: ChatItem {
+                                sig: row.get("sig")?,
+                                signee: Signee {
+                                    nonce: row.get("nonce")?,
+                                    timestamp: row.get("timestamp")?,
+                                    user: row.get("userkey")?,
+                                    payload: ChatPayload {
+                                        rich_text: row.get("rich_text")?,
+                                        room: rid,
+                                    },
                                 },
                             },
                         })
@@ -265,7 +266,8 @@ async fn room_list(
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;
-        let skip_token = (rooms.len() == page_len).then_some(()).and(last_rid);
+        let skip_token =
+            (rooms.len() == page_len).then(|| rooms.last().expect("page must not be empty").rid);
         Ok(RoomList { rooms, skip_token })
     };
 
@@ -273,7 +275,7 @@ async fn room_list(
         ListRoomFilter::Public => query(
             r"
             SELECT `rid`, `title`, `attrs`,
-                `last_author`.`userkey` AS `userkey`, `timestamp`, `nonce`, `sig`, `rich_text`
+                `cid`, `last_author`.`userkey`, `timestamp`, `nonce`, `sig`, `rich_text`
             FROM `room`
             LEFT JOIN `room_item` USING (`rid`)
             LEFT JOIN `user` AS `last_author` USING (`uid`)
@@ -295,7 +297,7 @@ async fn room_list(
                 r"
                 SELECT
                     `rid`, `title`, `attrs`,
-                    `last_author`.`userkey`, `timestamp`, `nonce`, `sig`, `rich_text`
+                    `cid`, `last_author`.`userkey`, `timestamp`, `nonce`, `sig`, `rich_text`
                 FROM `user`
                 JOIN `room_member` USING (`uid`)
                 JOIN `room` USING (`rid`)
@@ -408,7 +410,7 @@ async fn room_create(
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 struct Pagination {
     /// A opaque token from previous response to fetch the next page.
-    skip_token: Option<u64>,
+    skip_token: Option<Id>,
     /// Maximum page size.
     top: Option<NonZeroUsize>,
 }
@@ -424,9 +426,9 @@ impl Pagination {
 
 #[derive(Debug, Serialize)]
 struct RoomItems {
-    items: Vec<ChatItem>,
+    items: Vec<WithItemId<ChatItem>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    skip_token: Option<String>,
+    skip_token: Option<Id>,
 }
 
 async fn room_get_item(
@@ -440,11 +442,7 @@ async fn room_get_item(
         get_room_if_readable(&conn, rid, auth.into_optional()?.as_ref(), |_row| Ok(()))?;
         query_room_items(&st, &conn, rid, pagination)?
     };
-    let items = items.into_iter().map(|(_, item)| item).collect();
-    Ok(Json(RoomItems {
-        items,
-        skip_token: skip_token.map(|x| x.to_string()),
-    }))
+    Ok(Json(RoomItems { items, skip_token }))
 }
 
 async fn room_get_metadata(
@@ -482,7 +480,7 @@ async fn room_get_feed(
 
     let items = items
         .into_iter()
-        .map(|(cid, item)| {
+        .map(|WithItemId { cid, item }| {
             let time = SystemTime::UNIX_EPOCH + Duration::from_secs(item.signee.timestamp);
             let author = FeedAuthor {
                 name: item.signee.user.to_string(),
@@ -578,7 +576,7 @@ pub struct RoomMetadata {
 
     /// Optional extra information. Only included by the global room list response.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub last_chat: Option<ChatItem>,
+    pub last_chat: Option<WithItemId<ChatItem>>,
 }
 
 fn get_room_if_readable<T>(
@@ -610,8 +608,6 @@ fn get_room_if_readable<T>(
     .ok_or_else(|| error_response!(StatusCode::NOT_FOUND, "not_found", "room not found"))
 }
 
-type ChatItemWithId = (u64, ChatItem);
-
 /// Get room items with pagination parameters,
 /// return a page of items and the next skip_token if this is not the last page.
 fn query_room_items(
@@ -619,7 +615,7 @@ fn query_room_items(
     conn: &Connection,
     rid: Id,
     pagination: Pagination,
-) -> Result<(Vec<ChatItemWithId>, Option<u64>), ApiError> {
+) -> Result<(Vec<WithItemId<ChatItem>>, Option<Id>), ApiError> {
     let page_len = pagination.effective_page_len(st);
     let mut stmt = conn.prepare(
         r"
@@ -640,25 +636,26 @@ fn query_room_items(
                 ":limit": page_len,
             },
             |row| {
-                let cid = row.get::<_, u64>("cid")?;
-                let item = ChatItem {
-                    sig: row.get("sig")?,
-                    signee: Signee {
-                        nonce: row.get("nonce")?,
-                        timestamp: row.get("timestamp")?,
-                        user: row.get("userkey")?,
-                        payload: ChatPayload {
-                            room: rid,
-                            rich_text: row.get("rich_text")?,
+                Ok(WithItemId {
+                    cid: row.get("cid")?,
+                    item: ChatItem {
+                        sig: row.get("sig")?,
+                        signee: Signee {
+                            nonce: row.get("nonce")?,
+                            timestamp: row.get("timestamp")?,
+                            user: row.get("userkey")?,
+                            payload: ChatPayload {
+                                room: rid,
+                                rich_text: row.get("rich_text")?,
+                            },
                         },
                     },
-                };
-                Ok((cid, item))
+                })
             },
         )?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     let skip_token =
-        (items.len() == page_len).then(|| items.last().expect("page must not be empty").0);
+        (items.len() == page_len).then(|| items.last().expect("page must not be empty").cid);
 
     Ok((items, skip_token))
 }

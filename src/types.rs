@@ -24,6 +24,13 @@ impl fmt::Display for Id {
     }
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+pub struct WithItemId<T> {
+    pub cid: Id,
+    #[serde(flatten)]
+    pub item: T,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct UserKey(#[serde(with = "hex::serde")] pub [u8; PUBLIC_KEY_LENGTH]);

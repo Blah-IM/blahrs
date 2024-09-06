@@ -164,7 +164,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: WithSig<ChatPayload>
+              $ref: WithItemId<WithSig<ChatPayload>>
               example:
                 sig: 99a77e836538268839ed3419c649eefb043cb51d448f641cc2a1c523811aab4aacd09f92e7c0688ffd659bfc6acb764fea79979a491e132bf6a56dd23adc1d09
                 signee:
@@ -200,7 +200,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: WithSig<ChatPayload>
+              $ref: WithSig<AdminPayload>
               example:
                 sig: 99a77e836538268839ed3419c649eefb043cb51d448f641cc2a1c523811aab4aacd09f92e7c0688ffd659bfc6acb764fea79979a491e132bf6a56dd23adc1d09
                 signee:
@@ -260,7 +260,7 @@ components:
         attrs:
           type: int64
         last_chat:
-          $ref: 'WithSig<ChatPayload>'
+          $ref: 'WithItemId<WithSig<ChatPayload>>'
 
     RoomMetadata:
       type: object
@@ -280,6 +280,6 @@ components:
         items:
           type: array
           items:
-            $ref: 'WithSig<ChatPayload>'
+            $ref: 'WithItemId<WithSig<ChatPayload>>'
         skip_token:
           type: string
