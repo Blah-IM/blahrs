@@ -24,10 +24,11 @@ paths:
           in: query
           required: true
           description: |
-            Either "public" or "joined".
-            For "public", it returns all public rooms on the server.
-            For "joined", `Authorization` must be provided and it will return
-            rooms user have joined.
+            Must be one of following values:
+            - "public": list all public rooms on the server.
+            - "joined": list rooms the user have joined.
+            - "unseen": list rooms the user have joined and have unseen
+              messages.
         top:
           in: query
           description:
@@ -41,7 +42,9 @@ paths:
             should be included (as the same value) for each page fetch.
       headers:
         Authorization:
-          description: Proof of membership for private rooms. Required if `filter=joined`.
+          description: |
+            Proof of membership for private rooms.
+            Required if `filter` is other than "public".
           required: false
           schema:
             $ret: WithSig<AuthPayload>

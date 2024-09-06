@@ -213,8 +213,12 @@ struct ListRoomParams {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "snake_case")]
 enum ListRoomFilter {
+    /// List all public rooms.
     Public,
+    /// List joined rooms (authentication required).
     Joined,
+    /// List all joined rooms with unseen messages (authentication required).
+    Unseen,
 }
 
 async fn room_list(
@@ -261,12 +265,14 @@ async fn room_list(
                     .transpose()?;
                 let last_seen_cid =
                     Some(row.get::<_, Id>("last_seen_cid")?).filter(|cid| cid.0 != 0);
+                let unseen_cnt = row.get("unseen_cnt").ok();
                 Ok(RoomMetadata {
                     rid,
                     title,
                     attrs,
                     last_chat,
                     last_seen_cid,
+                    unseen_cnt,
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;
@@ -309,6 +315,36 @@ async fn room_list(
                 LEFT JOIN `user` AS `last_author` ON (`last_author`.`uid` = `room_item`.`uid`)
                 WHERE `user`.`userkey` = :userkey AND
                     `rid` > :start_rid
+                GROUP BY `rid` HAVING `cid` IS MAX(`cid`)
+                ORDER BY `rid` ASC
+                LIMIT :page_len
+                ",
+                named_params! {
+                    ":start_rid": start_rid,
+                    ":page_len": page_len,
+                    ":userkey": user,
+                },
+            )
+        }
+        ListRoomFilter::Unseen => {
+            let user = auth?.0;
+            query(
+                r"
+                SELECT
+                    `rid`, `title`, `attrs`, `last_seen_cid`,
+                    `cid`, `last_author`.`userkey`, `timestamp`, `nonce`, `sig`, `rich_text`,
+                    (SELECT COUNT(*)
+                        FROM `room_item` AS `unseen_item`
+                        WHERE `unseen_item`.`rid` = `room`.`rid` AND
+                            `last_seen_cid` < `unseen_item`.`cid`) AS `unseen_cnt`
+                FROM `user`
+                JOIN `room_member` USING (`uid`)
+                JOIN `room` USING (`rid`)
+                LEFT JOIN `room_item` USING (`rid`)
+                LEFT JOIN `user` AS `last_author` ON (`last_author`.`uid` = `room_item`.`uid`)
+                WHERE `user`.`userkey` = :userkey AND
+                    `rid` > :start_rid AND
+                    `cid` > `last_seen_cid`
                 GROUP BY `rid` HAVING `cid` IS MAX(`cid`)
                 ORDER BY `rid` ASC
                 LIMIT :page_len
@@ -466,8 +502,10 @@ async fn room_get_metadata(
         rid,
         title,
         attrs,
+        // TODO: Should we include these here?
         last_chat: None,
         last_seen_cid: None,
+        unseen_cnt: None,
     }))
 }
 
@@ -579,11 +617,15 @@ pub struct RoomMetadata {
     pub title: String,
     pub attrs: RoomAttrs,
 
-    /// Optional extra information. Only included by the room list response.
+    // Optional extra information. Only included by the room list response.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_chat: Option<WithItemId<ChatItem>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_seen_cid: Option<Id>,
+    /// The number of unseen messages. Only available for `room_list` response with
+    /// "filter=unseen".
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub unseen_cnt: Option<u64>,
 }
 
 fn get_room_if_readable<T>(
