@@ -229,6 +229,7 @@ async fn room_list(
     let pagination = Pagination {
         skip_token: params.skip_token,
         top: params.top,
+        until_token: None,
     };
     let page_len = pagination.effective_page_len(&st);
     let start_rid = pagination.skip_token.unwrap_or(Id(0));
@@ -453,6 +454,9 @@ struct Pagination {
     skip_token: Option<Id>,
     /// Maximum page size.
     top: Option<NonZeroUsize>,
+    /// Only return items before (excluding) this token.
+    /// Useful for `room_item_list` to pass `last_seen_cid` without over-fetching.
+    until_token: Option<Id>,
 }
 
 impl Pagination {
@@ -552,6 +556,7 @@ async fn room_get_feed(
         let next_params = Pagination {
             skip_token: Some(skip_token),
             top: pagination.top,
+            until_token: None,
         };
         let mut next_url = feed_url.clone();
         {
@@ -672,7 +677,8 @@ fn query_room_items(
         FROM `room_item`
         JOIN `user` USING (`uid`)
         WHERE `rid` = :rid AND
-            (:before_cid IS NULL OR `cid` < :before_cid)
+            :after_cid < `cid` AND
+            `cid` < :before_cid
         ORDER BY `cid` DESC
         LIMIT :limit
         ",
@@ -681,7 +687,8 @@ fn query_room_items(
         .query_and_then(
             named_params! {
                 ":rid": rid,
-                ":before_cid": pagination.skip_token,
+                ":after_cid": pagination.until_token.unwrap_or(Id(-1)),
+                ":before_cid": pagination.skip_token.unwrap_or(Id(i64::MAX)),
                 ":limit": page_len,
             },
             |row| {
