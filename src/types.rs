@@ -24,7 +24,7 @@ impl fmt::Display for Id {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WithItemId<T> {
     pub cid: Id,
     #[serde(flatten)]
@@ -43,7 +43,7 @@ impl fmt::Display for UserKey {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct WithSig<T> {
     #[serde(with = "hex::serde")]
@@ -51,7 +51,7 @@ pub struct WithSig<T> {
     pub signee: Signee<T>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Signee<T> {
     pub nonce: u32,
@@ -98,7 +98,7 @@ impl<T: Serialize> WithSig<T> {
 }
 
 // FIXME: `deny_unknown_fields` breaks this.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "typ", rename = "chat")]
 pub struct ChatPayload {
     pub rich_text: RichText,
@@ -106,11 +106,11 @@ pub struct ChatPayload {
 }
 
 /// Ref: <https://github.com/Blah-IM/Weblah/blob/a3fa0f265af54c846f8d65f42aa4409c8dba9dd9/src/lib/richText.ts>
-#[derive(Debug, Default, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 #[serde(transparent)]
 pub struct RichText(pub Vec<RichTextPiece>);
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RichTextPiece {
     pub attrs: TextAttrs,
     pub text: String,
@@ -130,7 +130,7 @@ impl Serialize for RichTextPiece {
 }
 
 /// The protocol representation of `RichTextPiece`.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(untagged)]
 enum RichTextPieceRaw {
     Text(String),
@@ -295,7 +295,7 @@ impl RichText {
 
 pub type ChatItem = WithSig<ChatPayload>;
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "typ", rename = "create_room")]
 pub struct CreateRoomPayload {
     pub attrs: RoomAttrs,
@@ -308,7 +308,7 @@ pub struct CreateRoomPayload {
 /// A collection of room members, with these invariants:
 /// 1. Sorted by userkeys.
 /// 2. No duplicated users.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(try_from = "Vec<RoomMember>")]
 pub struct RoomMemberList(pub Vec<RoomMember>);
 
@@ -333,7 +333,7 @@ impl TryFrom<Vec<RoomMember>> for RoomMemberList {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RoomMember {
     pub permission: MemberPermission,
     pub user: UserKey,
@@ -342,11 +342,11 @@ pub struct RoomMember {
 /// Proof of room membership for read-access.
 ///
 /// TODO: Should we use JWT here instead?
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "typ", rename = "auth")]
 pub struct AuthPayload {}
 
-#[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "typ", rename_all = "snake_case")]
 pub struct RoomAdminPayload {
     pub room: Id,
@@ -354,7 +354,7 @@ pub struct RoomAdminPayload {
     pub op: RoomAdminOp,
 }
 
-#[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "typ", rename_all = "snake_case")]
 pub enum RoomAdminOp {
     AddMember {
@@ -500,7 +500,7 @@ mod tests {
         expect.assert_eq(&json);
 
         let roundtrip_item = serde_json::from_str::<WithSig<ChatPayload>>(&json).unwrap();
-        // assert_eq!(roundtrip_item, item);
+        assert_eq!(roundtrip_item, item);
         roundtrip_item.verify().unwrap();
     }
 
