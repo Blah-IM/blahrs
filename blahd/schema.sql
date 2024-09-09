@@ -17,8 +17,8 @@ CREATE TABLE IF NOT EXISTS `room_member` (
     `rid`           INTEGER NOT NULL REFERENCES `room` ON DELETE CASCADE,
     `uid`           INTEGER NOT NULL REFERENCES `user` ON DELETE RESTRICT,
     `permission`    INTEGER NOT NULL,
-    `last_seen_cid` INTEGER NOT NULL REFERENCES `room_item` (`cid`) ON DELETE NO ACTION
-                    DEFAULT 0,
+    -- Optionally references `room_item`(`cid`).
+    `last_seen_cid` INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (`rid`, `uid`)
 ) STRICT;
 

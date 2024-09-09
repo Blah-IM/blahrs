@@ -8,24 +8,28 @@ use axum::response::{IntoResponse, Response};
 use axum::{async_trait, Json};
 use blah::types::{AuthPayload, UserKey, WithSig};
 use serde::de::DeserializeOwned;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::AppState;
 
 /// Error response body for json endpoints.
 ///
 /// Mostly following: <https://learn.microsoft.com/en-us/graph/errors>
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct ApiError {
-    #[serde(skip)]
+    #[serde(skip, default)]
     pub status: StatusCode,
-    pub code: &'static str,
+    pub code: String,
     pub message: String,
 }
 
 impl fmt::Display for ApiError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.message)
+        write!(
+            f,
+            "api error status={} code={}: {}",
+            self.status, self.code, self.message,
+        )
     }
 }
 
@@ -35,7 +39,7 @@ macro_rules! error_response {
     ($status:expr, $code:literal, $msg:literal $(, $msg_args:expr)* $(,)?) => {
         $crate::middleware::ApiError {
             status: $status,
-            code: $code,
+            code: $code.to_owned(),
             message: ::std::format!($msg $(, $msg_args)*),
         }
     };

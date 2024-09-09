@@ -17,7 +17,7 @@ use blah::types::{
 use config::ServerConfig;
 use ed25519_dalek::SIGNATURE_LENGTH;
 use id::IdExt;
-use middleware::{ApiError, Auth, MaybeAuth, ResultExt as _, SignedJson};
+use middleware::{Auth, MaybeAuth, ResultExt as _, SignedJson};
 use parking_lot::Mutex;
 use rusqlite::{named_params, params, Connection, OptionalExtension, Row, ToSql};
 use serde::{Deserialize, Serialize};
@@ -33,6 +33,7 @@ mod id;
 mod utils;
 
 pub use database::Database;
+pub use middleware::ApiError;
 
 // Locks must be grabbed in the field order.
 #[derive(Debug)]
