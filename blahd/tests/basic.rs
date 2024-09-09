@@ -37,13 +37,7 @@ fn server() -> Server {
     let listener = TcpListener::from_std(listener).unwrap();
 
     // TODO: Testing config is hard to build because it does have a `Default` impl.
-    let config = basic_toml::from_str(&format!(
-        r#"
-listen = "" # TODO: unused
-base_url = "http://{LOCALHOST}:{port}"
-    "#
-    ))
-    .unwrap();
+    let config = toml::from_str(&format!(r#"base_url="http://{LOCALHOST}:{port}""#)).unwrap();
     let st = AppState::new(db, config);
     let router = blahd::router(Arc::new(st));
 

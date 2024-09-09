@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use anyhow::{ensure, Result};
-use serde::{Deserialize, Deserializer};
+use serde::{Deserialize, Deserializer, Serialize};
 use serde_inline_default::serde_inline_default;
 use url::Url;
 
@@ -11,6 +11,7 @@ use url::Url;
 #[serde(deny_unknown_fields)]
 pub struct Config {
     pub database: DatabaseConfig,
+    pub listen: ListenConfig,
     pub server: ServerConfig,
 }
 
@@ -25,11 +26,17 @@ pub struct DatabaseConfig {
     pub create: bool,
 }
 
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ListenConfig {
+    Address(String),
+    // TODO: Unix socket.
+}
+
 #[serde_inline_default]
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ServerConfig {
-    pub listen: String,
     pub base_url: Url,
 
     #[serde_inline_default(1024.try_into().expect("not zero"))]
@@ -71,7 +78,7 @@ mod tests {
     #[test]
     fn example_config() {
         let src = std::fs::read_to_string("config.example.toml").unwrap();
-        let config = basic_toml::from_str::<Config>(&src).unwrap();
+        let config = toml::from_str::<Config>(&src).unwrap();
         config.validate().unwrap();
     }
 }

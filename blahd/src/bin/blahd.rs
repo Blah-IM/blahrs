@@ -1,7 +1,8 @@
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use blahd::config::Config;
+use blahd::config::{Config, ListenConfig};
 use blahd::{AppState, Database};
 
 /// Blah Chat Server
@@ -29,7 +30,7 @@ fn main() -> Result<()> {
 
     fn parse_config(path: &std::path::Path) -> Result<Config> {
         let src = std::fs::read_to_string(path)?;
-        let config = basic_toml::from_str::<Config>(&src)?;
+        let config = toml::from_str::<Config>(&src)?;
         config.validate()?;
         Ok(config)
     }
@@ -38,16 +39,33 @@ fn main() -> Result<()> {
         Cli::Serve { config } => {
             let config = parse_config(&config)?;
             let db = Database::open(&config.database).context("failed to open database")?;
-            let st = AppState::new(db, config.server);
             tokio::runtime::Builder::new_multi_thread()
                 .enable_all()
                 .build()
                 .context("failed to initialize tokio runtime")?
-                .block_on(st.serve())
+                .block_on(main_serve(db, config))
         }
         Cli::Validate { config } => {
             parse_config(&config)?;
             Ok(())
         }
     }
+}
+
+async fn main_serve(db: Database, config: Config) -> Result<()> {
+    let listener = match &config.listen {
+        ListenConfig::Address(addr) => tokio::net::TcpListener::bind(addr)
+            .await
+            .context("failed to listen on socket")?,
+    };
+    let st = AppState::new(db, config.server);
+
+    tracing::info!("listening on {:?}", config.listen);
+    let router = blahd::router(Arc::new(st));
+    let _ = sd_notify::notify(true, &[sd_notify::NotifyState::Ready]);
+
+    axum::serve(listener, router)
+        .await
+        .context("failed to serve")?;
+    Ok(())
 }

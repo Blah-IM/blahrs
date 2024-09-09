@@ -2,7 +2,7 @@ use std::num::NonZeroUsize;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use axum::extract::ws;
 use axum::extract::{Path, Query, State, WebSocketUpgrade};
 use axum::http::{header, StatusCode};
@@ -57,10 +57,6 @@ impl AppState {
         }
     }
 
-    pub async fn serve(self) -> Result<()> {
-        serve(Arc::new(self)).await
-    }
-
     fn verify_signed_data<T: Serialize>(&self, data: &WithSig<T>) -> Result<(), ApiError> {
         let Ok(()) = data.verify() else {
             return Err(error_response!(
@@ -93,20 +89,6 @@ impl AppState {
 }
 
 type ArcState = State<Arc<AppState>>;
-
-async fn serve(st: Arc<AppState>) -> Result<()> {
-    let listener = tokio::net::TcpListener::bind(&st.config.listen)
-        .await
-        .context("failed to listen on socket")?;
-    tracing::info!("listening on {}", st.config.listen);
-    let router = router(st.clone());
-    let _ = sd_notify::notify(true, &[sd_notify::NotifyState::Ready]);
-
-    axum::serve(listener, router)
-        .await
-        .context("failed to serve")?;
-    Ok(())
-}
 
 pub fn router(st: Arc<AppState>) -> Router {
     Router::new()

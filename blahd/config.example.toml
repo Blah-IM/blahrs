@@ -16,12 +16,12 @@ path = "/var/lib/blahd/db.sqlite"
 # Note that parent directory will never be created and must already exist.
 create = true
 
-[server]
-
+[listen]
 # (Required)
-# The socket address to listen on.
-listen = "localhost:8080"
+# The local address to listen on.
+address = "localhost:8080"
 
+[server]
 # (Required)
 # The global absolute URL prefix where this service is hosted.
 # It is for link generation and must not have trailing slash.
