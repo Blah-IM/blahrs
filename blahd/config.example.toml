@@ -3,7 +3,10 @@
 # the default value.
 
 [database]
-# (Required)
+# If enabled, a in-memory non-persistent database is used instead. Options
+# `path` and `create` are ignored. This should only be used for testing.
+in_memory = false
+
 # The path to the main SQLite database.
 # The file will be created and initialized if not exist, but missing directory
 # will not.

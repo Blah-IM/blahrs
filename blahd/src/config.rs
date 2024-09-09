@@ -18,6 +18,7 @@ pub struct Config {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct DatabaseConfig {
+    pub in_memory: bool,
     #[serde_inline_default("/var/lib/blahd/db.sqlite".into())]
     pub path: PathBuf,
     #[serde_inline_default(true)]

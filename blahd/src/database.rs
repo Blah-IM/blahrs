@@ -18,14 +18,31 @@ pub struct Database {
 }
 
 impl Database {
-    pub fn open(config: &DatabaseConfig) -> Result<Self> {
-        let mut flags = OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NO_MUTEX;
-        if !config.path.try_exists()? {
-            flags.set(OpenFlags::SQLITE_OPEN_CREATE, config.create);
-        }
+    /// Use an existing database connection and do no initialization or schema checking.
+    /// This should only be used for testing purpose.
+    pub fn from_raw(conn: Connection) -> Result<Self> {
+        conn.pragma_update(None, "foreign_keys", "TRUE")?;
+        Ok(Self { conn: conn.into() })
+    }
 
-        let mut conn = Connection::open_with_flags(&config.path, flags)
-            .context("failed to connect database")?;
+    pub fn open(config: &DatabaseConfig) -> Result<Self> {
+        let mut conn = if config.in_memory {
+            Connection::open_in_memory().context("failed to open in-memory database")?
+        } else {
+            let mut flags = OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NO_MUTEX;
+            if !config.path.try_exists()? {
+                flags.set(OpenFlags::SQLITE_OPEN_CREATE, config.create);
+            }
+            Connection::open_with_flags(&config.path, flags)
+                .context("failed to connect database")?
+        };
+        Self::maybe_init(&mut conn)?;
+        Ok(Self {
+            conn: Mutex::new(conn),
+        })
+    }
+
+    pub fn maybe_init(conn: &mut Connection) -> Result<()> {
         // Connection-specific pragmas.
         conn.pragma_update(None, "journal_mode", "WAL")?;
         conn.pragma_update(None, "foreign_keys", "TRUE")?;
@@ -50,10 +67,7 @@ impl Database {
             .context("failed to initialize database")?;
         txn.pragma_update(None, "application_id", APPLICATION_ID)?;
         txn.commit()?;
-
-        Ok(Self {
-            conn: Mutex::new(conn),
-        })
+        Ok(())
     }
 
     pub fn get(&self) -> impl DerefMut<Target = Connection> + '_ {

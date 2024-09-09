@@ -19,6 +19,7 @@ use tokio::sync::broadcast;
 use tokio_stream::wrappers::errors::BroadcastStreamRecvError;
 use tokio_stream::wrappers::BroadcastStream;
 
+use crate::config::ServerConfig;
 use crate::AppState;
 
 #[derive(Debug, Deserialize)]
@@ -52,14 +53,14 @@ impl std::error::Error for StreamEnded {}
 
 struct WsSenderWrapper<'ws, 'c> {
     inner: SplitSink<&'ws mut WebSocket, Message>,
-    config: &'c crate::config::Config,
+    config: &'c ServerConfig,
 }
 
 impl WsSenderWrapper<'_, '_> {
     async fn send(&mut self, msg: &Outgoing<'_>) -> Result<()> {
         let data = serde_json::to_string(&msg).expect("serialization cannot fail");
         let fut = tokio::time::timeout(
-            self.config.server.ws_send_timeout_sec,
+            self.config.ws_send_timeout_sec,
             self.inner.send(Message::Text(data)),
         );
         match fut.await {
@@ -108,7 +109,7 @@ pub async fn handle_ws(st: Arc<AppState>, ws: &mut WebSocket) -> Result<Infallib
     };
 
     let uid = {
-        let payload = tokio::time::timeout(st.config.server.ws_auth_timeout_sec, ws_rx.next())
+        let payload = tokio::time::timeout(st.config.ws_auth_timeout_sec, ws_rx.next())
             .await
             .context("authentication timeout")?
             .ok_or(StreamEnded)??;
@@ -136,7 +137,7 @@ pub async fn handle_ws(st: Arc<AppState>, ws: &mut WebSocket) -> Result<Infallib
         let rx = match st.event.user_listeners.lock().entry(uid) {
             Entry::Occupied(ent) => ent.get().subscribe(),
             Entry::Vacant(ent) => {
-                let (tx, rx) = broadcast::channel(st.config.server.ws_event_queue_len);
+                let (tx, rx) = broadcast::channel(st.config.ws_event_queue_len);
                 ent.insert(tx);
                 rx
             }

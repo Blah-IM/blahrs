@@ -1,5 +1,4 @@
 use std::num::NonZeroUsize;
-use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
@@ -15,8 +14,7 @@ use blah::types::{
     ChatItem, ChatPayload, CreateRoomPayload, Id, MemberPermission, RoomAdminOp, RoomAdminPayload,
     RoomAttrs, ServerPermission, Signee, UserKey, WithItemId, WithSig,
 };
-use config::Config;
-use database::Database;
+use config::ServerConfig;
 use ed25519_dalek::SIGNATURE_LENGTH;
 use id::IdExt;
 use middleware::{ApiError, Auth, MaybeAuth, ResultExt as _, SignedJson};
@@ -28,80 +26,39 @@ use utils::ExpiringSet;
 
 #[macro_use]
 mod middleware;
-mod config;
+pub mod config;
 mod database;
 mod event;
 mod id;
 mod utils;
 
-/// Blah Chat Server
-#[derive(Debug, clap::Parser)]
-#[clap(about, version = option_env!("CFG_RELEASE").unwrap_or(env!("CARGO_PKG_VERSION")))]
-enum Cli {
-    /// Run the server with given configuration.
-    Serve {
-        /// The path to the configuration file.
-        #[arg(long, short)]
-        config: PathBuf,
-    },
-
-    /// Validate the configuration file and exit.
-    Validate {
-        /// The path to the configuration file.
-        #[arg(long, short)]
-        config: PathBuf,
-    },
-}
-
-fn main() -> Result<()> {
-    tracing_subscriber::fmt::init();
-    let cli = <Cli as clap::Parser>::parse();
-
-    fn parse_config(path: &std::path::Path) -> Result<Config> {
-        let src = std::fs::read_to_string(path)?;
-        let config = basic_toml::from_str::<Config>(&src)?;
-        config.validate()?;
-        Ok(config)
-    }
-
-    match cli {
-        Cli::Serve { config } => {
-            let config = parse_config(&config)?;
-            let st = AppState::init(config).context("failed to initialize state")?;
-            tokio::runtime::Builder::new_multi_thread()
-                .enable_all()
-                .build()
-                .context("failed to initialize tokio runtime")?
-                .block_on(main_async(st))
-        }
-        Cli::Validate { config } => {
-            parse_config(&config)?;
-            Ok(())
-        }
-    }
-}
+pub use database::Database;
 
 // Locks must be grabbed in the field order.
 #[derive(Debug)]
-struct AppState {
+pub struct AppState {
     db: Database,
     used_nonces: Mutex<ExpiringSet<u32>>,
     event: event::State,
 
-    config: Config,
+    config: ServerConfig,
 }
 
 impl AppState {
-    fn init(config: Config) -> Result<Self> {
-        Ok(Self {
-            db: Database::open(&config.database).context("failed to open database")?,
+    pub fn new(db: Database, config: ServerConfig) -> Self {
+        Self {
+            db,
             used_nonces: Mutex::new(ExpiringSet::new(Duration::from_secs(
-                config.server.timestamp_tolerance_secs,
+                config.timestamp_tolerance_secs,
             ))),
             event: event::State::default(),
 
             config,
-        })
+        }
+    }
+
+    pub async fn serve(self) -> Result<()> {
+        serve(Arc::new(self)).await
     }
 
     fn verify_signed_data<T: Serialize>(&self, data: &WithSig<T>) -> Result<(), ApiError> {
@@ -117,7 +74,7 @@ impl AppState {
             .expect("after UNIX epoch")
             .as_secs()
             .abs_diff(data.signee.timestamp);
-        if timestamp_diff > self.config.server.timestamp_tolerance_secs {
+        if timestamp_diff > self.config.timestamp_tolerance_secs {
             return Err(error_response!(
                 StatusCode::BAD_REQUEST,
                 "invalid_timestamp",
@@ -137,10 +94,22 @@ impl AppState {
 
 type ArcState = State<Arc<AppState>>;
 
-async fn main_async(st: AppState) -> Result<()> {
-    let st = Arc::new(st);
+async fn serve(st: Arc<AppState>) -> Result<()> {
+    let listener = tokio::net::TcpListener::bind(&st.config.listen)
+        .await
+        .context("failed to listen on socket")?;
+    tracing::info!("listening on {}", st.config.listen);
+    let router = router(st.clone());
+    let _ = sd_notify::notify(true, &[sd_notify::NotifyState::Ready]);
 
-    let app = Router::new()
+    axum::serve(listener, router)
+        .await
+        .context("failed to serve")?;
+    Ok(())
+}
+
+pub fn router(st: Arc<AppState>) -> Router {
+    Router::new()
         .route("/ws", get(handle_ws))
         .route("/room", get(room_list))
         .route("/room/create", post(room_create))
@@ -150,27 +119,16 @@ async fn main_async(st: AppState) -> Result<()> {
         .route("/room/:rid/item", get(room_item_list).post(room_item_post))
         .route("/room/:rid/item/:cid/seen", post(room_item_mark_seen))
         .route("/room/:rid/admin", post(room_admin))
-        .with_state(st.clone())
         .layer(tower_http::limit::RequestBodyLimitLayer::new(
-            st.config.server.max_request_len,
+            st.config.max_request_len,
         ))
         // NB. This comes at last (outmost layer), so inner errors will still be wrapped with
         // correct CORS headers. Also `Authorization` must be explicitly included besides `*`.
         .layer(
             tower_http::cors::CorsLayer::permissive()
                 .allow_headers([header::HeaderName::from_static("*"), header::AUTHORIZATION]),
-        );
-
-    let listener = tokio::net::TcpListener::bind(&st.config.server.listen)
-        .await
-        .context("failed to listen on socket")?;
-    tracing::info!("listening on {}", st.config.server.listen);
-    let _ = sd_notify::notify(true, &[sd_notify::NotifyState::Ready]);
-
-    axum::serve(listener, app)
-        .await
-        .context("failed to serve")?;
-    Ok(())
+        )
+        .with_state(st)
 }
 
 type RE<T> = R<T, ApiError>;
@@ -193,11 +151,11 @@ async fn handle_ws(State(st): ArcState, ws: WebSocketUpgrade) -> Response {
     })
 }
 
-#[derive(Debug, Serialize)]
-struct RoomList {
-    rooms: Vec<RoomMetadata>,
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RoomList {
+    pub rooms: Vec<RoomMetadata>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    skip_token: Option<Id>,
+    pub skip_token: Option<Id>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -463,16 +421,16 @@ impl Pagination {
     fn effective_page_len(&self, st: &AppState) -> usize {
         self.top
             .unwrap_or(usize::MAX.try_into().expect("not zero"))
-            .min(st.config.server.max_page_len)
+            .min(st.config.max_page_len)
             .get()
     }
 }
 
 #[derive(Debug, Serialize)]
-struct RoomItems {
-    items: Vec<WithItemId<ChatItem>>,
+pub struct RoomItems {
+    pub items: Vec<WithItemId<ChatItem>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    skip_token: Option<Id>,
+    pub skip_token: Option<Id>,
 }
 
 async fn room_item_list(
@@ -548,7 +506,6 @@ async fn room_get_feed(
 
     let feed_url = st
         .config
-        .server
         .base_url
         .join(&format!("/room/{rid}/feed.json"))
         .expect("base_url must be valid");
@@ -616,7 +573,7 @@ struct FeedItemExtra {
     sig: [u8; SIGNATURE_LENGTH],
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RoomMetadata {
     pub rid: Id,
     pub title: String,
