@@ -819,8 +819,8 @@ async fn room_join(
         .is_some_and(|attrs| attrs.contains(RoomAttrs::PUBLIC_JOINABLE));
     if !is_public_joinable {
         return Err(error_response!(
-            StatusCode::FORBIDDEN,
-            "permission_denied",
+            StatusCode::NOT_FOUND,
+            "not_found",
             "room does not exists or user is not allowed to join this room",
         ));
     }
@@ -833,14 +833,13 @@ async fn room_join(
         ",
         params![user],
     )?;
-    txn.execute(
+    let updated = txn.execute(
         r"
         INSERT INTO `room_member` (`rid`, `uid`, `permission`)
         SELECT :rid, `uid`, :perm
         FROM `user`
         WHERE `userkey` = :userkey
-        ON CONFLICT (`rid`, `uid`) DO UPDATE SET
-            `permission` = :perm
+        ON CONFLICT (`rid`, `uid`) DO NOTHING
         ",
         named_params! {
            ":rid": rid,
@@ -848,6 +847,13 @@ async fn room_join(
            ":perm": permission,
         },
     )?;
+    if updated == 0 {
+        return Err(error_response!(
+            StatusCode::CONFLICT,
+            "exists",
+            "the user is already in the room",
+        ));
+    }
     txn.commit()?;
     Ok(())
 }

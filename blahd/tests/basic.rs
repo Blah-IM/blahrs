@@ -6,8 +6,8 @@ use std::sync::{Arc, LazyLock};
 
 use anyhow::Result;
 use blah::types::{
-    get_timestamp, AuthPayload, CreateRoomPayload, Id, MemberPermission, RoomAttrs, RoomMember,
-    RoomMemberList, ServerPermission, UserKey, WithSig,
+    get_timestamp, AuthPayload, CreateRoomPayload, Id, MemberPermission, RoomAdminOp,
+    RoomAdminPayload, RoomAttrs, RoomMember, RoomMemberList, ServerPermission, UserKey, WithSig,
 };
 use blahd::{ApiError, AppState, Database, RoomList, RoomMetadata};
 use ed25519_dalek::SigningKey;
@@ -30,6 +30,9 @@ static BOB_PRIV: LazyLock<SigningKey> = LazyLock::new(|| SigningKey::from_bytes(
 fn mock_rng() -> impl RngCore {
     rand::rngs::mock::StepRng::new(9, 1)
 }
+
+#[derive(Debug, Deserialize)]
+enum NoContent {}
 
 trait ResultExt {
     fn expect_api_err(self, status: StatusCode, code: &str);
@@ -257,4 +260,98 @@ async fn room_create_get(server: Server, #[case] public: bool) {
         .await
         .unwrap();
     assert_eq!(got_joined, expect_list(false));
+}
+
+#[rstest]
+#[tokio::test]
+async fn room_join_leave(server: Server) {
+    let rng = &mut mock_rng();
+    let rid_pub = create_room(
+        &server,
+        &ALICE_PRIV,
+        rng,
+        RoomAttrs::PUBLIC_JOINABLE,
+        "public room",
+    )
+    .await
+    .unwrap();
+    let rid_priv = create_room(
+        &server,
+        &ALICE_PRIV,
+        rng,
+        RoomAttrs::empty(),
+        "private room",
+    )
+    .await
+    .unwrap();
+
+    let mut join = |rid: Id, key: &SigningKey| {
+        let req = sign(
+            key,
+            rng,
+            RoomAdminPayload {
+                room: rid,
+                op: RoomAdminOp::AddMember {
+                    permission: MemberPermission::MAX_SELF_ADD,
+                    user: UserKey(key.verifying_key().to_bytes()),
+                },
+            },
+        );
+        server.request::<_, NoContent>(Method::POST, format!("/room/{rid}/admin"), None, Some(req))
+    };
+
+    // Ok.
+    join(rid_pub, &BOB_PRIV).await.unwrap();
+    // Already joined.
+    join(rid_pub, &BOB_PRIV)
+        .await
+        .expect_api_err(StatusCode::CONFLICT, "exists");
+    // Not permitted.
+    join(rid_priv, &BOB_PRIV)
+        .await
+        .expect_api_err(StatusCode::NOT_FOUND, "not_found");
+    // Not exists.
+    join(Id::INVALID, &BOB_PRIV)
+        .await
+        .expect_api_err(StatusCode::NOT_FOUND, "not_found");
+
+    // Bob is joined now.
+    assert_eq!(
+        server
+            .get::<RoomList>("/room?filter=joined", Some(&auth(&BOB_PRIV, rng)))
+            .await
+            .unwrap()
+            .rooms
+            .len(),
+        1,
+    );
+
+    let mut leave = |rid: Id, key: &SigningKey| {
+        let req = sign(
+            key,
+            rng,
+            RoomAdminPayload {
+                room: rid,
+                op: RoomAdminOp::RemoveMember {
+                    user: UserKey(key.verifying_key().to_bytes()),
+                },
+            },
+        );
+        server.request::<_, NoContent>(Method::POST, format!("/room/{rid}/admin"), None, Some(req))
+    };
+
+    // Ok.
+    leave(rid_pub, &BOB_PRIV).await.unwrap();
+    // Already left.
+    leave(rid_pub, &BOB_PRIV)
+        .await
+        .expect_api_err(StatusCode::NOT_FOUND, "not_found");
+    // Unpermitted and not inside.
+    leave(rid_priv, &BOB_PRIV)
+        .await
+        .expect_api_err(StatusCode::NOT_FOUND, "not_found");
+    // Unpermitted and not inside.
+    leave(Id::INVALID, &BOB_PRIV)
+        .await
+        .expect_api_err(StatusCode::NOT_FOUND, "not_found");
 }

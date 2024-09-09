@@ -24,6 +24,10 @@ impl fmt::Display for Id {
     }
 }
 
+impl Id {
+    pub const INVALID: Self = Id(i64::MAX);
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WithItemId<T> {
     pub cid: Id,
@@ -347,7 +351,7 @@ pub struct RoomMember {
 pub struct AuthPayload {}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "typ", rename_all = "snake_case")]
+// `typ` is provided by `RoomAdminOp`.
 pub struct RoomAdminPayload {
     pub room: Id,
     #[serde(flatten)]
