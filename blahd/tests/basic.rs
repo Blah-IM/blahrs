@@ -102,6 +102,8 @@ impl Server {
 
 #[fixture]
 fn server() -> Server {
+    let _ = tracing_subscriber::fmt::try_init();
+
     let mut conn = Connection::open_in_memory().unwrap();
     Database::maybe_init(&mut conn).unwrap();
     conn.execute(

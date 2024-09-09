@@ -62,6 +62,7 @@ macro_rules! define_from_deser_rejection {
         $(
             impl From<$ty> for ApiError {
                 fn from(rej: $ty) -> Self {
+                    tracing::debug!(?rej, "rejected");
                     error_response!(
                         StatusCode::BAD_REQUEST,
                         "deserialization",
