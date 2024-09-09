@@ -76,7 +76,7 @@ impl<T: Serialize> WithSig<T> {
     pub fn sign(
         key: &SigningKey,
         timestamp: u64,
-        rng: &mut impl RngCore,
+        rng: &mut (impl RngCore + ?Sized),
         payload: T,
     ) -> Result<Self, SignatureError> {
         let signee = Signee {

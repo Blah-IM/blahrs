@@ -1,5 +1,7 @@
 // FIXME: False positive?
 #![allow(clippy::unwrap_used)]
+// Easy to use for fixtures.
+#![allow(clippy::toplevel_ref_arg)]
 use std::fmt;
 use std::future::IntoFuture;
 use std::sync::{Arc, LazyLock};
@@ -27,8 +29,9 @@ static ALICE: LazyLock<UserKey> = LazyLock::new(|| UserKey(ALICE_PRIV.verifying_
 static BOB_PRIV: LazyLock<SigningKey> = LazyLock::new(|| SigningKey::from_bytes(&[b'B'; 32]));
 // static BOB: LazyLock<UserKey> = LazyLock::new(|| UserKey(BOB_PRIV.verifying_key().to_bytes()));
 
-fn mock_rng() -> impl RngCore {
-    rand::rngs::mock::StepRng::new(9, 1)
+#[fixture]
+fn rng() -> impl RngCore {
+    rand::rngs::mock::StepRng::new(42, 1)
 }
 
 #[derive(Debug, Deserialize)]
@@ -180,8 +183,7 @@ async fn create_room(
 #[case::public(true)]
 #[case::private(false)]
 #[tokio::test]
-async fn room_create_get(server: Server, #[case] public: bool) {
-    let rng = &mut mock_rng();
+async fn room_create_get(server: Server, ref mut rng: impl RngCore, #[case] public: bool) {
     let mut room_meta = RoomMetadata {
         rid: Id(0),
         title: "test room".into(),
@@ -264,8 +266,7 @@ async fn room_create_get(server: Server, #[case] public: bool) {
 
 #[rstest]
 #[tokio::test]
-async fn room_join_leave(server: Server) {
-    let rng = &mut mock_rng();
+async fn room_join_leave(server: Server, ref mut rng: impl RngCore) {
     let rid_pub = create_room(
         &server,
         &ALICE_PRIV,
