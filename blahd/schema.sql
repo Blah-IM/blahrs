@@ -7,11 +7,25 @@ CREATE TABLE IF NOT EXISTS `user` (
     `permission`    INTEGER NOT NULL DEFAULT 0
 ) STRICT;
 
+-- The highest bit of `rid` will be set for peer chat room.
+-- So simply comparing it against 0 can filter them out.
 CREATE TABLE IF NOT EXISTS `room` (
     `rid`       INTEGER NOT NULL PRIMARY KEY,
-    `title`     TEXT NOT NULL,
+    -- RoomAttrs::PEER_CHAT
     `attrs`     INTEGER NOT NULL
+                CHECK ((`attrs` & 0x10000 == 0x10000) == `rid` < 0),
+    `title`     TEXT
+                CHECK ((`title` ISNULL) == `rid` < 0),
+
+    `peer1`     INTEGER REFERENCES `user` ON DELETE RESTRICT
+                CHECK ((`peer1` NOTNULL) == `rid` < 0),
+    `peer2`     INTEGER REFERENCES `user` ON DELETE RESTRICT
+                CHECK ((`peer2` NOTNULL AND `peer1` <= `peer2`) IS `rid` < 0)
 ) STRICT;
+
+CREATE UNIQUE INDEX IF NOT EXISTS `ix_peer_chat` ON `room`
+    (`peer1`, `peer2`)
+    WHERE `rid` < 0;
 
 CREATE TABLE IF NOT EXISTS `room_member` (
     `rid`           INTEGER NOT NULL REFERENCES `room` ON DELETE CASCADE,

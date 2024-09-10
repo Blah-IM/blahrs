@@ -7,9 +7,9 @@ use std::sync::{Arc, LazyLock};
 
 use anyhow::Result;
 use blah_types::{
-    get_timestamp, AuthPayload, ChatItem, ChatPayload, CreateRoomPayload, Id, MemberPermission,
-    RichText, RoomAdminOp, RoomAdminPayload, RoomAttrs, RoomMember, RoomMemberList, RoomMetadata,
-    ServerPermission, UserKey, WithItemId, WithSig,
+    get_timestamp, AuthPayload, ChatItem, ChatPayload, CreateGroup, CreatePeerChat,
+    CreateRoomPayload, Id, MemberPermission, RichText, RoomAdminOp, RoomAdminPayload, RoomAttrs,
+    RoomMember, RoomMemberList, RoomMetadata, ServerPermission, UserKey, WithItemId, WithSig,
 };
 use blahd::{ApiError, AppState, Database, RoomItems, RoomList};
 use ed25519_dalek::SigningKey;
@@ -29,7 +29,7 @@ const LOCALHOST: &str = "127.0.0.1";
 static ALICE_PRIV: LazyLock<SigningKey> = LazyLock::new(|| SigningKey::from_bytes(&[b'A'; 32]));
 static ALICE: LazyLock<UserKey> = LazyLock::new(|| UserKey(ALICE_PRIV.verifying_key().to_bytes()));
 static BOB_PRIV: LazyLock<SigningKey> = LazyLock::new(|| SigningKey::from_bytes(&[b'B'; 32]));
-// static BOB: LazyLock<UserKey> = LazyLock::new(|| UserKey(BOB_PRIV.verifying_key().to_bytes()));
+static BOB: LazyLock<UserKey> = LazyLock::new(|| UserKey(BOB_PRIV.verifying_key().to_bytes()));
 
 #[fixture]
 fn rng() -> impl RngCore {
@@ -118,14 +118,14 @@ impl Server {
         let req = sign(
             key,
             &mut *self.rng.borrow_mut(),
-            CreateRoomPayload {
+            CreateRoomPayload::Group(CreateGroup {
                 attrs,
                 members: RoomMemberList(vec![RoomMember {
                     permission: MemberPermission::ALL,
                     user: UserKey(key.verifying_key().to_bytes()),
                 }]),
                 title: title.to_string(),
-            },
+            }),
         );
         async move {
             Ok(self
@@ -254,9 +254,10 @@ fn auth(key: &SigningKey, rng: &mut impl RngCore) -> String {
 #[case::private(false)]
 #[tokio::test]
 async fn room_create_get(server: Server, ref mut rng: impl RngCore, #[case] public: bool) {
+    let title = "test room";
     let mut room_meta = RoomMetadata {
         rid: Id(0),
-        title: "test room".into(),
+        title: Some(title.into()),
         attrs: if public {
             RoomAttrs::PUBLIC_READABLE | RoomAttrs::PUBLIC_JOINABLE
         } else {
@@ -266,18 +267,19 @@ async fn room_create_get(server: Server, ref mut rng: impl RngCore, #[case] publ
         last_seen_cid: None,
         unseen_cnt: None,
         member_permission: None,
+        peer_user: None,
     };
 
     // Alice has permission.
     let rid = server
-        .create_room(&ALICE_PRIV, room_meta.attrs, &room_meta.title)
+        .create_room(&ALICE_PRIV, room_meta.attrs, title)
         .await
         .unwrap();
     room_meta.rid = rid;
 
     // Bob has no permission.
     server
-        .create_room(&BOB_PRIV, room_meta.attrs, &room_meta.title)
+        .create_room(&BOB_PRIV, room_meta.attrs, title)
         .await
         .expect_api_err(StatusCode::FORBIDDEN, "permission_denied");
 
@@ -579,12 +581,13 @@ async fn last_seen_item(server: Server, ref mut rng: impl RngCore) {
         RoomList {
             rooms: vec![RoomMetadata {
                 rid,
-                title: title.into(),
+                title: Some(title.into()),
                 attrs,
                 last_item: Some(alice_chat2.clone()),
                 last_seen_cid: None,
                 unseen_cnt: Some(2),
                 member_permission: Some(member_perm),
+                peer_user: None,
             }],
             skip_token: None,
         }
@@ -612,12 +615,13 @@ async fn last_seen_item(server: Server, ref mut rng: impl RngCore) {
         RoomList {
             rooms: vec![RoomMetadata {
                 rid,
-                title: title.into(),
+                title: Some(title.into()),
                 attrs,
                 last_item: Some(alice_chat2.clone()),
                 last_seen_cid: Some(alice_chat1.cid),
                 unseen_cnt: Some(1),
                 member_permission: Some(member_perm),
+                peer_user: None,
             }],
             skip_token: None,
         }
@@ -638,4 +642,77 @@ async fn last_seen_item(server: Server, ref mut rng: impl RngCore) {
         .await
         .unwrap();
     assert_eq!(rooms, RoomList::default());
+}
+
+#[rstest]
+#[tokio::test]
+async fn peer_chat(server: Server, ref mut rng: impl RngCore) {
+    let mut create_chat = |src: &SigningKey, tgt: &UserKey| {
+        let req = sign(
+            src,
+            rng,
+            CreateRoomPayload::PeerChat(CreatePeerChat { peer: tgt.clone() }),
+        );
+        server
+            .request::<_, Id>(Method::POST, "/room/create", None, Some(req))
+            .map_ok(|resp| resp.unwrap())
+    };
+
+    // Bob disallows peer chat.
+    create_chat(&ALICE_PRIV, &BOB)
+        .await
+        .expect_api_err(StatusCode::NOT_FOUND, "not_found");
+
+    // Alice accepts bob.
+    let rid = create_chat(&BOB_PRIV, &ALICE).await.unwrap();
+
+    // Room already exists.
+    create_chat(&BOB_PRIV, &ALICE)
+        .await
+        .expect_api_err(StatusCode::CONFLICT, "exists");
+
+    // Peer chat room is not public.
+    let rooms = server
+        .get::<RoomList>("/room?filter=public", None)
+        .await
+        .unwrap();
+    assert_eq!(rooms, RoomList::default());
+    server
+        .get::<RoomMetadata>(&format!("/room/{rid}"), None)
+        .await
+        .expect_api_err(StatusCode::NOT_FOUND, "not_found");
+
+    // Both alice and bob are in the room.
+    for (key, peer) in [(&*ALICE_PRIV, &*BOB), (&*BOB_PRIV, &*ALICE)] {
+        let mut expect_meta = RoomMetadata {
+            rid,
+            title: None,
+            attrs: RoomAttrs::PEER_CHAT,
+            last_item: None,
+            last_seen_cid: None,
+            unseen_cnt: None,
+            member_permission: None,
+            peer_user: None,
+        };
+
+        let meta = server
+            .get::<RoomMetadata>(&format!("/room/{rid}"), Some(&auth(key, rng)))
+            .await
+            .unwrap();
+        assert_eq!(meta, expect_meta);
+
+        expect_meta.member_permission = Some(MemberPermission::MAX_PEER_CHAT);
+        expect_meta.peer_user = Some(peer.clone());
+        let rooms = server
+            .get::<RoomList>("/room?filter=joined", Some(&auth(key, rng)))
+            .await
+            .unwrap();
+        assert_eq!(
+            rooms,
+            RoomList {
+                rooms: vec![expect_meta],
+                skip_token: None
+            }
+        );
+    }
 }

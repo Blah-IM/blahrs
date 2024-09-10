@@ -28,7 +28,9 @@ impl fmt::Display for Id {
 }
 
 impl Id {
-    pub const INVALID: Self = Id(i64::MAX);
+    pub const MIN: Self = Id(i64::MIN);
+    pub const MAX: Self = Id(i64::MAX);
+    pub const INVALID: Self = Self::MAX;
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -312,8 +314,8 @@ pub type ChatItem = WithSig<ChatPayload>;
 pub struct RoomMetadata {
     /// Room id.
     pub rid: Id,
-    /// Plain text room title.
-    pub title: String,
+    /// Plain text room title. None for peer chat.
+    pub title: Option<String>,
     /// Room attributes.
     pub attrs: RoomAttrs,
 
@@ -333,16 +335,34 @@ pub struct RoomMetadata {
     /// Only available with authentication.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub member_permission: Option<MemberPermission>,
+    /// The peer user, if this is a peer chat room.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub peer_user: Option<UserKey>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "typ", rename = "create_room")]
-pub struct CreateRoomPayload {
+#[serde(tag = "typ")]
+pub enum CreateRoomPayload {
+    #[serde(rename = "create_room")]
+    Group(CreateGroup),
+    #[serde(rename = "create_peer_chat")]
+    PeerChat(CreatePeerChat),
+}
+
+/// Multi-user room.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CreateGroup {
     pub attrs: RoomAttrs,
     /// The initial member list. Besides invariants of `RoomMemberList`, this also must include the
     /// room creator themselves, with the highest permission (-1).
     pub members: RoomMemberList,
     pub title: String,
+}
+
+/// Peer-to-peer chat room with exactly two symmetric users.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CreatePeerChat {
+    pub peer: UserKey,
 }
 
 /// A collection of room members, with these invariants:
@@ -408,9 +428,12 @@ pub enum RoomAdminOp {
 }
 
 bitflags::bitflags! {
+    /// TODO: Is this a really all about permission, or is a generic `UserFlags`?
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub struct ServerPermission: u64 {
         const CREATE_ROOM = 1 << 0;
+
+        const ACCEPT_PEER_CHAT = 1 << 16;
 
         const ALL = !0;
     }
@@ -421,6 +444,7 @@ bitflags::bitflags! {
         const ADD_MEMBER = 1 << 1;
 
         const MAX_SELF_ADD = Self::POST_CHAT.bits();
+        const MAX_PEER_CHAT = Self::POST_CHAT.bits();
 
         const ALL = !0;
     }
@@ -429,6 +453,11 @@ bitflags::bitflags! {
     pub struct RoomAttrs: u64 {
         const PUBLIC_READABLE = 1 << 0;
         const PUBLIC_JOINABLE = 1 << 1;
+
+        const GROUP_ATTRS = (1 << 16) - 1;
+
+        // NB. Used by schema.
+        const PEER_CHAT = 1 << 16;
 
         const _ = !0;
     }

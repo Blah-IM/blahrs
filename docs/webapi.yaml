@@ -108,6 +108,13 @@ paths:
   /room/create:
     post:
       summary: Create room
+
+      description:
+        When `typ="create_room"`, create a multi-user room.
+
+        When `typ="create_peer_chat"`, create a peer-to-peer room between two
+        users. There can be at most one peer room for each given user pair.
+
       requestBody:
         content:
           application/json:
@@ -125,6 +132,20 @@ paths:
 
         403:
           description: The user does not have permission to create room.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+
+        404:
+          description: The peer user does not exist or disallows peer chat.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+
+        409:
+          description: There is already a peer chat room between the user pair.
           content:
             application/json:
               schema:
@@ -391,6 +412,10 @@ components:
         member_permission:
           type: integer
           format: int64
+        peer_user:
+          type: string
+          description: |
+            For peer chat room, this gives the identity of the peer user.
 
     RoomMetadata:
       type: object
@@ -577,23 +602,32 @@ components:
               type: integer
               format: uint32
             payload:
-              type: object
-              properties:
-                typ:
-                  type: string
-                  const: 'create_room'
-                title:
-                  type: string
-                members:
-                  type: array
-                  items:
-                    type: object
-                    properties:
-                      user:
-                        type: string
-                      permission:
-                        type: integer
-                        format: int64
+              oneOf:
+                - type: object
+                  properties:
+                    typ:
+                      type: string
+                      const: 'create_room'
+                    title:
+                      type: string
+                    members:
+                      type: array
+                      items:
+                        type: object
+                        properties:
+                          user:
+                            type: string
+                          permission:
+                            type: integer
+                            format: int64
+                - type: object
+                  properties:
+                    typ:
+                      type: string
+                      const: 'create_peer_chat'
+                    peer:
+                      type: string
+
       example:
         sig: 99a77e836538268839ed3419c649eefb043cb51d448f641cc2a1c523811aab4aacd09f92e7c0688ffd659bfc6acb764fea79979a491e132bf6a56dd23adc1d09
         signee:
