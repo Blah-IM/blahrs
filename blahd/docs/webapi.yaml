@@ -4,17 +4,47 @@ info:
   version: 0.0.1
 
 paths:
+  # OAPI does not support WebSocket interface definitions.
+  # See: https://github.com/OAI/OpenAPI-Specification/issues/55#issuecomment-929382279
   /ws:
     get:
       summary: WebSocket endpoint
       description: |
-        Once connection, client must send a JSON text message of type
-        `WithSig<AuthPayload>` for authentication.
+        This endpoint is for server-side-event dispatching.
+
+        Once connected, client must send a JSON text message of type
+        `WithSig-Auth` for authentication.
         If server does not close it immediately, it means success.
 
-        Then server will send JSON text messages on events that user are
-        interested in (eg. chat from joined rooms).
-        The message has type `Outgoing` in `blahd/src/ws.rs`.
+        Since OAPI does not support WebSocket interface, we use request and
+        response types documented here mean outgoing and incoming JSON text
+        messages.
+
+      parameters:
+        - name: Connection
+          in: header
+          required: true
+        - name: Upgrade
+          in: header
+          required: true
+
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WSClientToServer'
+
+      responses:
+        101:
+          headers:
+            Connection:
+              required: true
+            Upgrade:
+              required: true
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WSServerToClient'
 
   /room:
     get:
@@ -284,6 +314,23 @@ paths:
 # WAIT: https://github.com/juhaku/utoipa/pull/1034
 components:
   schemas:
+    WSClientToServer:
+      anyOf:
+        - $ref: '#/components/schemas/WithSig-Auth'
+
+    WSServerToClient:
+      anyOf:
+        - type: object
+          properties:
+            chat:
+              $ref: '#/components/schemas/WithSig-Chat'
+
+        - type: object
+          properties:
+            lagged:
+              type: object
+              const: {}
+
     ApiError:
       type: object
       properties:
