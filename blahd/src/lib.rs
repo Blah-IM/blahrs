@@ -413,7 +413,7 @@ impl Pagination {
     }
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RoomItems {
     pub items: Vec<WithItemId<ChatItem>>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -790,7 +790,7 @@ async fn room_admin(
                     "only self-adding is implemented yet",
                 ));
             }
-            if permission.is_empty() || !MemberPermission::MAX_SELF_ADD.contains(permission) {
+            if !MemberPermission::MAX_SELF_ADD.contains(permission) {
                 return Err(error_response!(
                     StatusCode::BAD_REQUEST,
                     "deserialization",

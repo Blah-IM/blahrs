@@ -7,10 +7,11 @@ use std::sync::{Arc, LazyLock};
 
 use anyhow::Result;
 use blah_types::{
-    get_timestamp, AuthPayload, CreateRoomPayload, Id, MemberPermission, RoomAdminOp,
-    RoomAdminPayload, RoomAttrs, RoomMember, RoomMemberList, ServerPermission, UserKey, WithSig,
+    get_timestamp, AuthPayload, ChatItem, ChatPayload, CreateRoomPayload, Id, MemberPermission,
+    RichText, RoomAdminOp, RoomAdminPayload, RoomAttrs, RoomMember, RoomMemberList,
+    ServerPermission, UserKey, WithItemId, WithSig,
 };
-use blahd::{ApiError, AppState, Database, RoomList, RoomMetadata};
+use blahd::{ApiError, AppState, Database, RoomItems, RoomList, RoomMetadata};
 use ed25519_dalek::SigningKey;
 use futures_util::TryFutureExt;
 use rand::rngs::mock::StepRng;
@@ -362,4 +363,150 @@ async fn room_join_leave(server: Server, ref mut rng: impl RngCore) {
     leave(Id::INVALID, &BOB_PRIV)
         .await
         .expect_api_err(StatusCode::NOT_FOUND, "not_found");
+}
+
+#[rstest]
+#[tokio::test]
+async fn room_item_post_read(server: Server, ref mut rng: impl RngCore) {
+    let rid_pub = server
+        .create_room(
+            &ALICE_PRIV,
+            RoomAttrs::PUBLIC_READABLE | RoomAttrs::PUBLIC_JOINABLE,
+            "public room",
+        )
+        .await
+        .unwrap();
+    let rid_priv = server
+        .create_room(&ALICE_PRIV, RoomAttrs::empty(), "private room")
+        .await
+        .unwrap();
+
+    let mut chat = |rid: Id, key: &SigningKey, msg: &str| {
+        sign(
+            key,
+            rng,
+            ChatPayload {
+                room: rid,
+                rich_text: RichText::from(msg),
+            },
+        )
+    };
+    let post = |rid: Id, chat: ChatItem| {
+        server
+            .request::<_, Id>(Method::POST, format!("/room/{rid}/item"), None, Some(chat))
+            .map_ok(|opt| opt.unwrap())
+    };
+
+    // Ok.
+    let chat1 = chat(rid_pub, &ALICE_PRIV, "one");
+    let chat2 = chat(rid_pub, &ALICE_PRIV, "two");
+    let cid1 = post(rid_pub, chat1.clone()).await.unwrap();
+    let cid2 = post(rid_pub, chat2.clone()).await.unwrap();
+
+    // Duplicated chat.
+    post(rid_pub, chat2.clone())
+        .await
+        .expect_api_err(StatusCode::BAD_REQUEST, "duplicated_nonce");
+
+    // Wrong room.
+    post(rid_pub, chat(rid_priv, &ALICE_PRIV, "wrong room"))
+        .await
+        .expect_api_err(StatusCode::BAD_REQUEST, "invalid_request");
+
+    // Not a member.
+    post(rid_pub, chat(rid_pub, &BOB_PRIV, "not a member"))
+        .await
+        .expect_api_err(StatusCode::NOT_FOUND, "not_found");
+
+    // Is a member but without permission.
+    server
+        .join_room(rid_pub, &BOB_PRIV, MemberPermission::empty())
+        .await
+        .unwrap();
+    post(rid_pub, chat(rid_pub, &BOB_PRIV, "no permission"))
+        .await
+        .expect_api_err(StatusCode::FORBIDDEN, "permission_denied");
+
+    // Room not exists.
+    post(Id::INVALID, chat(Id::INVALID, &ALICE_PRIV, "not permitted"))
+        .await
+        .expect_api_err(StatusCode::NOT_FOUND, "not_found");
+
+    //// Item listing ////
+
+    let chat1 = WithItemId::new(cid1, chat1);
+    let chat2 = WithItemId::new(cid2, chat2);
+
+    // List with default page size.
+    let items = server
+        .get::<RoomItems>(format!("/room/{rid_pub}/item"), None)
+        .await
+        .unwrap();
+    assert_eq!(
+        items,
+        RoomItems {
+            items: vec![chat2.clone(), chat1.clone()],
+            skip_token: None,
+        },
+    );
+
+    // List with small page size.
+    let items = server
+        .get::<RoomItems>(format!("/room/{rid_pub}/item?top=1"), None)
+        .await
+        .unwrap();
+    assert_eq!(
+        items,
+        RoomItems {
+            items: vec![chat2.clone()],
+            skip_token: Some(cid2),
+        },
+    );
+
+    // Second page.
+    let items = server
+        .get::<RoomItems>(format!("/room/{rid_pub}/item?skipToken={cid2}&top=1"), None)
+        .await
+        .unwrap();
+    assert_eq!(
+        items,
+        RoomItems {
+            items: vec![chat1.clone()],
+            skip_token: Some(cid1),
+        },
+    );
+
+    // No more.
+    let items = server
+        .get::<RoomItems>(format!("/room/{rid_pub}/item?skipToken={cid1}&top=1"), None)
+        .await
+        .unwrap();
+    assert_eq!(items, RoomItems::default());
+
+    //// Private room ////
+
+    // Access without token.
+    server
+        .get::<RoomItems>(format!("/room/{rid_priv}/item"), None)
+        .await
+        .expect_api_err(StatusCode::NOT_FOUND, "not_found");
+
+    // Not a member.
+    server
+        .get::<RoomItems>(
+            format!("/room/{rid_priv}/item"),
+            Some(&auth(&BOB_PRIV, rng)),
+        )
+        .await
+        .expect_api_err(StatusCode::NOT_FOUND, "not_found");
+
+    // Ok.
+    let items = server
+        .get::<RoomItems>(
+            format!("/room/{rid_priv}/item"),
+            Some(&auth(&ALICE_PRIV, rng)),
+        )
+        .await
+        .unwrap();
+    assert_eq!(items, RoomItems::default());
 }

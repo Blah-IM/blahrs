@@ -38,6 +38,12 @@ pub struct WithItemId<T> {
     pub item: T,
 }
 
+impl<T> WithItemId<T> {
+    pub fn new(cid: Id, item: T) -> Self {
+        Self { cid, item }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct UserKey(#[serde(with = "hex::serde")] pub [u8; PUBLIC_KEY_LENGTH]);
