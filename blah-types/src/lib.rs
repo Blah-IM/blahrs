@@ -329,6 +329,8 @@ pub struct RoomMetadata {
     /// This may or may not be a precise number.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub unseen_cnt: Option<u64>,
+    /// The member permission of current user in the room, or `None` if it is not a member.
+    /// Only available with authentication.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub member_permission: Option<MemberPermission>,
 }

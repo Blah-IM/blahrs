@@ -388,6 +388,9 @@ components:
             GET `/room?filter=unseen`.
           type: integer
           format: uint64
+        member_permission:
+          type: integer
+          format: int64
 
     RoomMetadata:
       type: object
