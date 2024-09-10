@@ -1,5 +1,6 @@
 #![expect(clippy::unwrap_used, reason = "FIXME: random false positive")]
 #![expect(clippy::toplevel_ref_arg, reason = "easy to use for fixtures")]
+use std::cell::RefCell;
 use std::fmt;
 use std::future::{Future, IntoFuture};
 use std::sync::{Arc, LazyLock};
@@ -11,6 +12,8 @@ use blah_types::{
 };
 use blahd::{ApiError, AppState, Database, RoomList, RoomMetadata};
 use ed25519_dalek::SigningKey;
+use futures_util::TryFutureExt;
+use rand::rngs::mock::StepRng;
 use rand::RngCore;
 use reqwest::{header, Method, StatusCode};
 use rstest::{fixture, rstest};
@@ -52,6 +55,7 @@ impl<T: fmt::Debug> ResultExt for Result<T> {
 struct Server {
     port: u16,
     client: reqwest::Client,
+    rng: RefCell<StepRng>,
 }
 
 impl Server {
@@ -102,6 +106,68 @@ impl Server {
             .await?
             .unwrap())
     }
+
+    fn create_room(
+        &self,
+        key: &SigningKey,
+        attrs: RoomAttrs,
+        title: &str,
+    ) -> impl Future<Output = Result<Id>> + use<'_> {
+        let req = sign(
+            key,
+            &mut *self.rng.borrow_mut(),
+            CreateRoomPayload {
+                attrs,
+                members: RoomMemberList(vec![RoomMember {
+                    permission: MemberPermission::ALL,
+                    user: UserKey(key.verifying_key().to_bytes()),
+                }]),
+                title: title.to_string(),
+            },
+        );
+        async move {
+            Ok(self
+                .request(Method::POST, "/room/create", None, Some(&req))
+                .await?
+                .unwrap())
+        }
+    }
+
+    fn join_room(
+        &self,
+        rid: Id,
+        key: &SigningKey,
+        permission: MemberPermission,
+    ) -> impl Future<Output = Result<()>> + use<'_> {
+        let req = sign(
+            key,
+            &mut *self.rng.borrow_mut(),
+            RoomAdminPayload {
+                room: rid,
+                op: RoomAdminOp::AddMember {
+                    permission,
+                    user: UserKey(key.verifying_key().to_bytes()),
+                },
+            },
+        );
+        self.request::<_, NoContent>(Method::POST, format!("/room/{rid}/admin"), None, Some(req))
+            .map_ok(|None| {})
+    }
+
+    fn leave_room(&self, rid: Id, key: &SigningKey) -> impl Future<Output = Result<()>> + use<'_> {
+        let req = sign(
+            key,
+            &mut *self.rng.borrow_mut(),
+            RoomAdminPayload {
+                room: rid,
+                op: RoomAdminOp::RemoveMember {
+                    user: UserKey(key.verifying_key().to_bytes()),
+                },
+            },
+        );
+        self.request::<_, NoContent>(Method::POST, format!("/room/{rid}/admin"), None, Some(req))
+            .map_ok(|None| {})
+    }
 }
 
 #[fixture]
@@ -130,7 +196,8 @@ fn server() -> Server {
 
     tokio::spawn(axum::serve(listener, router).into_future());
     let client = reqwest::ClientBuilder::new().no_proxy().build().unwrap();
-    Server { port, client }
+    let rng = StepRng::new(24, 1).into();
+    Server { port, client, rng }
 }
 
 #[rstest]
@@ -152,33 +219,6 @@ fn auth(key: &SigningKey, rng: &mut impl RngCore) -> String {
     serde_json::to_string(&sign(key, rng, AuthPayload {})).unwrap()
 }
 
-fn create_room<'s>(
-    server: &'s Server,
-    key: &SigningKey,
-    rng: &mut dyn RngCore,
-    attrs: RoomAttrs,
-    title: &str,
-) -> impl Future<Output = Result<Id>> + use<'s> {
-    let req = sign(
-        key,
-        rng,
-        CreateRoomPayload {
-            attrs,
-            members: RoomMemberList(vec![RoomMember {
-                permission: MemberPermission::ALL,
-                user: UserKey(key.verifying_key().to_bytes()),
-            }]),
-            title: title.to_string(),
-        },
-    );
-    async move {
-        Ok(server
-            .request(Method::POST, "/room/create", None, Some(&req))
-            .await?
-            .unwrap())
-    }
-}
-
 #[rstest]
 #[case::public(true)]
 #[case::private(false)]
@@ -198,13 +238,15 @@ async fn room_create_get(server: Server, ref mut rng: impl RngCore, #[case] publ
     };
 
     // Alice has permission.
-    let rid = create_room(&server, &ALICE_PRIV, rng, room_meta.attrs, &room_meta.title)
+    let rid = server
+        .create_room(&ALICE_PRIV, room_meta.attrs, &room_meta.title)
         .await
         .unwrap();
     room_meta.rid = rid;
 
     // Bob has no permission.
-    create_room(&server, &BOB_PRIV, rng, room_meta.attrs, &room_meta.title)
+    server
+        .create_room(&BOB_PRIV, room_meta.attrs, &room_meta.title)
         .await
         .expect_api_err(StatusCode::FORBIDDEN, "permission_denied");
 
@@ -261,39 +303,17 @@ async fn room_create_get(server: Server, ref mut rng: impl RngCore, #[case] publ
 #[rstest]
 #[tokio::test]
 async fn room_join_leave(server: Server, ref mut rng: impl RngCore) {
-    let rid_pub = create_room(
-        &server,
-        &ALICE_PRIV,
-        rng,
-        RoomAttrs::PUBLIC_JOINABLE,
-        "public room",
-    )
-    .await
-    .unwrap();
-    let rid_priv = create_room(
-        &server,
-        &ALICE_PRIV,
-        rng,
-        RoomAttrs::empty(),
-        "private room",
-    )
-    .await
-    .unwrap();
+    let rid_pub = server
+        .create_room(&ALICE_PRIV, RoomAttrs::PUBLIC_JOINABLE, "public room")
+        .await
+        .unwrap();
+    let rid_priv = server
+        .create_room(&ALICE_PRIV, RoomAttrs::empty(), "private room")
+        .await
+        .unwrap();
 
-    let mut join = |rid: Id, key: &SigningKey| {
-        let req = sign(
-            key,
-            rng,
-            RoomAdminPayload {
-                room: rid,
-                op: RoomAdminOp::AddMember {
-                    permission: MemberPermission::MAX_SELF_ADD,
-                    user: UserKey(key.verifying_key().to_bytes()),
-                },
-            },
-        );
-        server.request::<_, NoContent>(Method::POST, format!("/room/{rid}/admin"), None, Some(req))
-    };
+    let join =
+        |rid: Id, key: &SigningKey| server.join_room(rid, key, MemberPermission::MAX_SELF_ADD);
 
     // Ok.
     join(rid_pub, &BOB_PRIV).await.unwrap();
@@ -309,6 +329,11 @@ async fn room_join_leave(server: Server, ref mut rng: impl RngCore) {
     join(Id::INVALID, &BOB_PRIV)
         .await
         .expect_api_err(StatusCode::NOT_FOUND, "not_found");
+    // Overly high permission.
+    server
+        .join_room(rid_priv, &BOB_PRIV, MemberPermission::ALL)
+        .await
+        .expect_api_err(StatusCode::BAD_REQUEST, "deserialization");
 
     // Bob is joined now.
     assert_eq!(
@@ -321,19 +346,7 @@ async fn room_join_leave(server: Server, ref mut rng: impl RngCore) {
         1,
     );
 
-    let mut leave = |rid: Id, key: &SigningKey| {
-        let req = sign(
-            key,
-            rng,
-            RoomAdminPayload {
-                room: rid,
-                op: RoomAdminOp::RemoveMember {
-                    user: UserKey(key.verifying_key().to_bytes()),
-                },
-            },
-        );
-        server.request::<_, NoContent>(Method::POST, format!("/room/{rid}/admin"), None, Some(req))
-    };
+    let leave = |rid: Id, key: &SigningKey| server.leave_room(rid, key);
 
     // Ok.
     leave(rid_pub, &BOB_PRIV).await.unwrap();
@@ -345,7 +358,7 @@ async fn room_join_leave(server: Server, ref mut rng: impl RngCore) {
     leave(rid_priv, &BOB_PRIV)
         .await
         .expect_api_err(StatusCode::NOT_FOUND, "not_found");
-    // Unpermitted and not inside.
+    // Invalid room.
     leave(Id::INVALID, &BOB_PRIV)
         .await
         .expect_api_err(StatusCode::NOT_FOUND, "not_found");
