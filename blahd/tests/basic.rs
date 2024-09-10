@@ -1,7 +1,5 @@
-// FIXME: False positive?
-#![allow(clippy::unwrap_used)]
-// Easy to use for fixtures.
-#![allow(clippy::toplevel_ref_arg)]
+#![expect(clippy::unwrap_used, reason = "FIXME: random false positive")]
+#![expect(clippy::toplevel_ref_arg, reason = "easy to use for fixtures")]
 use std::fmt;
 use std::future::IntoFuture;
 use std::sync::{Arc, LazyLock};

@@ -56,14 +56,13 @@ enum Command {
 }
 
 #[derive(Debug, clap::Subcommand)]
-#[allow(clippy::large_enum_variant)]
 enum DbCommand {
     /// Create and initialize database.
     Init,
     /// Set user property, possibly adding new users.
     SetUser {
         #[command(flatten)]
-        user: User,
+        user: Box<User>,
 
         #[arg(long, value_parser = flag_parser::<ServerPermission>)]
         permission: ServerPermission,

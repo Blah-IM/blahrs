@@ -8,6 +8,7 @@ members = [
 default-members = ["blahd"]
 
 [workspace.lints.clippy]
+allow_attributes = "warn"
 dbg_macro = "warn"
 print_stderr = "warn"
 print_stdout = "warn"
