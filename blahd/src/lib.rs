@@ -902,6 +902,13 @@ async fn room_admin(
             "URI and payload room id mismatch",
         ));
     }
+    if rid.is_peer_chat() {
+        return Err(error_response!(
+            StatusCode::BAD_REQUEST,
+            "invalid_request",
+            "operation not permitted on peer chat rooms",
+        ));
+    }
 
     match op.signee.payload.op {
         RoomAdminOp::AddMember { user, permission } => {

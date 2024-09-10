@@ -8,6 +8,8 @@ use blah_types::Id;
 pub trait IdExt {
     fn gen() -> Self;
     fn gen_peer_chat_rid() -> Self;
+
+    fn is_peer_chat(&self) -> bool;
 }
 
 impl IdExt for Id {
@@ -25,5 +27,9 @@ impl IdExt for Id {
 
     fn gen_peer_chat_rid() -> Self {
         Id(Self::gen().0 | i64::MIN)
+    }
+
+    fn is_peer_chat(&self) -> bool {
+        self.0 < 0
     }
 }
