@@ -3,6 +3,6 @@
 *.key
 
 config.toml
-/pages/default.json
+/test-frontend/default.json
 result
 result-*

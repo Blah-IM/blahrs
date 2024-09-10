@@ -56,7 +56,7 @@ rec {
 
               postInstall = ''
                 mkdir -p $out/etc/systemd/system
-                substitute ./blahd/blahd.example.service $out/etc/systemd/system/blahd.service \
+                substitute ./contrib/blahd.example.service $out/etc/systemd/system/blahd.service \
                   --replace-fail '/usr/bin/blahd' "$out/bin/blahd"
               '';
 
@@ -77,7 +77,7 @@ rec {
 
       nixosModules = rec {
         default = blahd;
-        blahd = import ./nix/module.nix {
+        blahd = import ./contrib/module.nix {
           inherit self;
         };
       };
