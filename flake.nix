@@ -7,6 +7,10 @@ rec {
       url = "github:nix-community/naersk";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+    rust-overlay = {
+      url = "github:oxalica/rust-overlay";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
 
   outputs =
@@ -14,6 +18,7 @@ rec {
       self,
       nixpkgs,
       naersk,
+      rust-overlay,
     }:
     let
       inherit (nixpkgs) lib;
@@ -26,7 +31,13 @@ rec {
         system:
         let
           pkgs = nixpkgs.legacyPackages.${system};
-          naersk' = pkgs.callPackage naersk { };
+          rustBin = rust-overlay.lib.mkRustBin { } pkgs;
+          toolchain = rustBin.fromRustupToolchainFile ./rust-toolchain.toml;
+          naersk' = pkgs.callPackage naersk {
+            cargo = toolchain;
+            rustc = toolchain;
+          };
+
           mkPkg =
             {
               pkg-config,
@@ -71,6 +82,21 @@ rec {
           blahd = (pkgs.callPackage mkPkg { }).overrideAttrs {
             # Only set this for the main derivation, not for deps.
             CFG_RELEASE = "git-${rev}";
+          };
+        }
+      );
+
+      devShells = eachSystem (
+        system:
+        let
+          pkgs = nixpkgs.legacyPackages.${system};
+        in
+        {
+          default = pkgs.mkShell {
+            inputsFrom = [ self.packages.${system}.default ];
+            nativeBuildInputs = [ pkgs.buildPackages.sqlite-interactive ];
+
+            env.RUST_LOG = "blahd=debug,blahctl=debug";
           };
         }
       );

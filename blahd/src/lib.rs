@@ -119,6 +119,10 @@ type RE<T> = R<T, ApiError>;
 async fn handle_ws(State(st): ArcState, ws: WebSocketUpgrade) -> Response {
     ws.on_upgrade(move |mut socket| async move {
         match event::handle_ws(st, &mut socket).await {
+            #[allow(
+                unreachable_patterns,
+                reason = "compatibility before min_exhaustive_patterns"
+            )]
             Ok(never) => match never {},
             Err(err) if err.is::<event::StreamEnded>() => {}
             Err(err) => {

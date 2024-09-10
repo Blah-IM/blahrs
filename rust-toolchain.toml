@@ -1,0 +1,7 @@
+# WAIT: Rust 1.82 release on 2024-10-17
+# Used features:
+# - min_exhaustive_patterns: https://github.com/rust-lang/rust/issues/119612
+# - precise_capturing: https://github.com/rust-lang/rust/issues/123432
+[toolchain]
+channel = "beta-2024-09-10" # 1.82.0-beta.3
+profile = "default"

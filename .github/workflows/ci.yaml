@@ -20,10 +20,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install Rust stable
+      - name: Install Rust beta
         run: |
-          rustup update --no-self-update stable
-          rustup default stable
+          rustup update --no-self-update beta
+          rustup default beta
 
       - name: Cache dependencies
         uses: Swatinem/rust-cache@v2
@@ -40,7 +40,7 @@ jobs:
   test:
     strategy:
       matrix:
-        rust: [stable]
+        rust: [stable, beta]
     name: Test ${{ matrix.rust }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -48,10 +48,17 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Disable high-priority rust-toolchain.toml
+        run: rm rust-toolchain.toml
+
       - name: Install Rust ${{ matrix.rust }}
         run: |
           rustup update --no-self-update ${{ matrix.rust }}
           rustup default ${{ matrix.rust }}
+
+      - name: Disable integration tests on stable rustc
+        if: matrix.rust == 'stable'
+        run: mv ./blahd/tests{,-disabled}
 
       - name: Cache Dependencies
         uses: Swatinem/rust-cache@v2

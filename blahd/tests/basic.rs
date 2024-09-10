@@ -1,7 +1,7 @@
 #![expect(clippy::unwrap_used, reason = "FIXME: random false positive")]
 #![expect(clippy::toplevel_ref_arg, reason = "easy to use for fixtures")]
 use std::fmt;
-use std::future::IntoFuture;
+use std::future::{Future, IntoFuture};
 use std::sync::{Arc, LazyLock};
 
 use anyhow::Result;
@@ -144,7 +144,7 @@ async fn smoke(server: Server) {
     assert_eq!(got, exp);
 }
 
-fn sign<T: Serialize>(key: &SigningKey, rng: &mut impl RngCore, payload: T) -> WithSig<T> {
+fn sign<T: Serialize>(key: &SigningKey, rng: &mut dyn RngCore, payload: T) -> WithSig<T> {
     WithSig::sign(key, get_timestamp(), rng, payload).unwrap()
 }
 
@@ -152,13 +152,13 @@ fn auth(key: &SigningKey, rng: &mut impl RngCore) -> String {
     serde_json::to_string(&sign(key, rng, AuthPayload {})).unwrap()
 }
 
-async fn create_room(
-    server: &Server,
+fn create_room<'s>(
+    server: &'s Server,
     key: &SigningKey,
-    rng: &mut impl RngCore,
+    rng: &mut dyn RngCore,
     attrs: RoomAttrs,
-    title: impl fmt::Display,
-) -> Result<Id> {
+    title: &str,
+) -> impl Future<Output = Result<Id>> + use<'s> {
     let req = sign(
         key,
         rng,
@@ -171,10 +171,12 @@ async fn create_room(
             title: title.to_string(),
         },
     );
-    Ok(server
-        .request(Method::POST, "/room/create", None, Some(&req))
-        .await?
-        .unwrap())
+    async move {
+        Ok(server
+            .request(Method::POST, "/room/create", None, Some(&req))
+            .await?
+            .unwrap())
+    }
 }
 
 #[rstest]
@@ -202,15 +204,9 @@ async fn room_create_get(server: Server, ref mut rng: impl RngCore, #[case] publ
     room_meta.rid = rid;
 
     // Bob has no permission.
-    create_room(
-        &server,
-        &BOB_PRIV,
-        rng,
-        room_meta.attrs,
-        room_meta.title.clone(),
-    )
-    .await
-    .expect_api_err(StatusCode::FORBIDDEN, "permission_denied");
+    create_room(&server, &BOB_PRIV, rng, room_meta.attrs, &room_meta.title)
+        .await
+        .expect_api_err(StatusCode::FORBIDDEN, "permission_denied");
 
     // Alice can always access it.
     let got_meta = server
