@@ -1,7 +1,6 @@
 use std::fmt;
 use std::time::SystemTime;
 
-use bitflags::bitflags;
 use bitflags_serde_shim::impl_serde_for_bitflags;
 use ed25519_dalek::{
     Signature, SignatureError, Signer, SigningKey, VerifyingKey, PUBLIC_KEY_LENGTH,
@@ -10,6 +9,10 @@ use ed25519_dalek::{
 use rand_core::RngCore;
 use serde::{de, Deserialize, Deserializer, Serialize, Serializer};
 use serde_with::{serde_as, DisplayFromStr};
+
+// Re-export of public dependencies.
+pub use bitflags;
+pub use ed25519_dalek;
 
 /// An opaque server-specific ID for room, chat item, and etc.
 /// It's currently serialized as a string for JavaScript's convenience.
@@ -371,7 +374,7 @@ pub enum RoomAdminOp {
     // TODO: RU
 }
 
-bitflags! {
+bitflags::bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub struct ServerPermission: u64 {
         const CREATE_ROOM = 1 << 0;

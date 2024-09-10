@@ -1,7 +1,7 @@
 [workspace]
 resolver = "2"
 members = [
-    ".",
+    "blah-types",
     "blahctl",
     "blahd",
 ]
@@ -14,28 +14,3 @@ print_stderr = "warn"
 print_stdout = "warn"
 todo = "warn"
 unwrap_used = "warn"
-
-[package]
-name = "blah"
-version = "0.0.0"
-edition = "2021"
-
-[dependencies]
-bitflags = "2"
-bitflags_serde_shim = "0.2"
-ed25519-dalek = "2.1"
-hex = { version = "0.4", features = ["serde"] }
-html-escape = "0.2"
-rand = "0.8.5"
-rand_core = "0.6"
-rusqlite = { version = "0.32", optional = true }
-serde = { version = "1", features = ["derive"] }
-serde_jcs = "0.1"
-serde_json = "1"
-serde_with = "3.9.0"
-
-[dev-dependencies]
-expect-test = "1.5.0"
-
-[lints]
-workspace = true

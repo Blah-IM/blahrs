@@ -6,7 +6,7 @@ use axum::extract::{FromRef, FromRequest, FromRequestParts, Request};
 use axum::http::{header, request, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::{async_trait, Json};
-use blah::types::{AuthPayload, UserKey, WithSig};
+use blah_types::{AuthPayload, UserKey, WithSig};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 

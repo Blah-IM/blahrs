@@ -8,7 +8,7 @@ use std::task::{Context, Poll};
 
 use anyhow::{bail, Context as _, Result};
 use axum::extract::ws::{Message, WebSocket};
-use blah::types::{AuthPayload, ChatItem, WithSig};
+use blah_types::{AuthPayload, ChatItem, WithSig};
 use futures_util::future::Either;
 use futures_util::stream::SplitSink;
 use futures_util::{stream_select, SinkExt as _, Stream, StreamExt};

@@ -3,10 +3,9 @@ use std::path::{Path, PathBuf};
 use std::{fs, io};
 
 use anyhow::{Context, Result};
-use blah::bitflags;
-use blah::types::{
-    get_timestamp, ChatPayload, CreateRoomPayload, Id, MemberPermission, RichText, RoomAttrs,
-    RoomMember, RoomMemberList, ServerPermission, UserKey, WithSig,
+use blah_types::{
+    bitflags, get_timestamp, ChatPayload, CreateRoomPayload, Id, MemberPermission, RichText,
+    RoomAttrs, RoomMember, RoomMemberList, ServerPermission, UserKey, WithSig,
 };
 use ed25519_dalek::pkcs8::spki::der::pem::LineEnding;
 use ed25519_dalek::pkcs8::{DecodePrivateKey, DecodePublicKey, EncodePrivateKey, EncodePublicKey};

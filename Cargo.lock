@@ -260,7 +260,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "blah"
+name = "blah-types"
 version = "0.0.0"
 dependencies = [
  "bitflags",
@@ -283,7 +283,7 @@ name = "blahctl"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "blah",
+ "blah-types",
  "clap",
  "ed25519-dalek",
  "hex",
@@ -300,7 +300,7 @@ dependencies = [
  "anyhow",
  "axum",
  "axum-extra",
- "blah",
+ "blah-types",
  "clap",
  "ed25519-dalek",
  "futures-util",

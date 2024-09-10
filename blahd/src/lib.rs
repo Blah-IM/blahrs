@@ -10,7 +10,7 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use axum_extra::extract::WithRejection as R;
-use blah::types::{
+use blah_types::{
     ChatItem, ChatPayload, CreateRoomPayload, Id, MemberPermission, RoomAdminOp, RoomAdminPayload,
     RoomAttrs, ServerPermission, Signee, UserKey, WithItemId, WithSig,
 };

@@ -13,7 +13,7 @@ reqwest = { version = "0.12", features = ["json"] }
 rusqlite = "0.32"
 tokio = { version = "1", features = ["rt", "macros"] }
 
-blah = { path = "..", features = ["rusqlite"] }
+blah-types = { path = "../blah-types", features = ["rusqlite"] }
 
 [lints.clippy]
 dbg_macro = "warn"

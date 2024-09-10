@@ -5,7 +5,7 @@ use std::future::IntoFuture;
 use std::sync::{Arc, LazyLock};
 
 use anyhow::Result;
-use blah::types::{
+use blah_types::{
     get_timestamp, AuthPayload, CreateRoomPayload, Id, MemberPermission, RoomAdminOp,
     RoomAdminPayload, RoomAttrs, RoomMember, RoomMemberList, ServerPermission, UserKey, WithSig,
 };

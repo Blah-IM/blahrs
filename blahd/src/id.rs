@@ -3,7 +3,7 @@
 /// FIXME: Currently we assume no more than one request in a single millisecond.
 use std::time::SystemTime;
 
-use blah::types::Id;
+use blah_types::Id;
 
 pub trait IdExt {
     fn gen() -> Self;
