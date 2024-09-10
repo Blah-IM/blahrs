@@ -212,6 +212,7 @@ async fn room_list(
                 let last_seen_cid =
                     Some(row.get::<_, Id>("last_seen_cid")?).filter(|cid| cid.0 != 0);
                 let unseen_cnt = row.get("unseen_cnt").ok();
+                let member_permission = row.get("member_perm").ok();
                 Ok(RoomMetadata {
                     rid,
                     title,
@@ -219,6 +220,7 @@ async fn room_list(
                     last_item,
                     last_seen_cid,
                     unseen_cnt,
+                    member_permission,
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;
@@ -252,7 +254,7 @@ async fn room_list(
             query(
                 r"
                 SELECT
-                    `rid`, `title`, `attrs`, `last_seen_cid`,
+                    `rid`, `title`, `attrs`, `last_seen_cid`, `room_member`.`permission` AS `member_perm`,
                     `cid`, `last_author`.`userkey`, `timestamp`, `nonce`, `sig`, `rich_text`
                 FROM `user`
                 JOIN `room_member` USING (`uid`)
@@ -277,7 +279,7 @@ async fn room_list(
             query(
                 r"
                 SELECT
-                    `rid`, `title`, `attrs`, `last_seen_cid`,
+                    `rid`, `title`, `attrs`, `last_seen_cid`, `room_member`.`permission` AS `member_perm`,
                     `cid`, `last_author`.`userkey`, `timestamp`, `nonce`, `sig`, `rich_text`,
                     (SELECT COUNT(*)
                         FROM `room_item` AS `unseen_item`
@@ -456,6 +458,7 @@ async fn room_get_metadata(
         last_item: None,
         last_seen_cid: None,
         unseen_cnt: None,
+        member_permission: None,
     }))
 }
 

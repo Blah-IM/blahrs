@@ -265,6 +265,7 @@ async fn room_create_get(server: Server, ref mut rng: impl RngCore, #[case] publ
         last_item: None,
         last_seen_cid: None,
         unseen_cnt: None,
+        member_permission: None,
     };
 
     // Alice has permission.
@@ -300,8 +301,15 @@ async fn room_create_get(server: Server, ref mut rng: impl RngCore, #[case] publ
     }
 
     // The room appears in public list only when it is public.
-    let expect_list = |has: bool| RoomList {
-        rooms: has.then(|| room_meta.clone()).into_iter().collect(),
+    let expect_list = |has: bool, perm: Option<MemberPermission>| RoomList {
+        rooms: if has {
+            vec![RoomMetadata {
+                member_permission: perm,
+                ..room_meta.clone()
+            }]
+        } else {
+            Vec::new()
+        },
         skip_token: None,
     };
     assert_eq!(
@@ -309,7 +317,7 @@ async fn room_create_get(server: Server, ref mut rng: impl RngCore, #[case] publ
             .get::<RoomList>("/room?filter=public", None)
             .await
             .unwrap(),
-        expect_list(public),
+        expect_list(public, None),
     );
 
     // Joined rooms endpoint always require authentication.
@@ -321,13 +329,13 @@ async fn room_create_get(server: Server, ref mut rng: impl RngCore, #[case] publ
         .get::<RoomList>("/room?filter=joined", Some(&auth(&ALICE_PRIV, rng)))
         .await
         .unwrap();
-    assert_eq!(got_joined, expect_list(true));
+    assert_eq!(got_joined, expect_list(true, Some(MemberPermission::ALL)));
 
     let got_joined = server
         .get::<RoomList>("/room?filter=joined", Some(&auth(&BOB_PRIV, rng)))
         .await
         .unwrap();
-    assert_eq!(got_joined, expect_list(false));
+    assert_eq!(got_joined, expect_list(false, None));
 }
 
 #[rstest]
@@ -551,6 +559,7 @@ async fn room_item_post_read(server: Server, ref mut rng: impl RngCore) {
 async fn last_seen_item(server: Server, ref mut rng: impl RngCore) {
     let title = "public room";
     let attrs = RoomAttrs::PUBLIC_READABLE | RoomAttrs::PUBLIC_JOINABLE;
+    let member_perm = MemberPermission::ALL;
     let rid = server.create_room(&ALICE_PRIV, attrs, title).await.unwrap();
     server
         .join_room(rid, &BOB_PRIV, MemberPermission::MAX_SELF_ADD)
@@ -575,6 +584,7 @@ async fn last_seen_item(server: Server, ref mut rng: impl RngCore) {
                 last_item: Some(alice_chat2.clone()),
                 last_seen_cid: None,
                 unseen_cnt: Some(2),
+                member_permission: Some(member_perm),
             }],
             skip_token: None,
         }
@@ -607,6 +617,7 @@ async fn last_seen_item(server: Server, ref mut rng: impl RngCore) {
                 last_item: Some(alice_chat2.clone()),
                 last_seen_cid: Some(alice_chat1.cid),
                 unseen_cnt: Some(1),
+                member_permission: Some(member_perm),
             }],
             skip_token: None,
         }
