@@ -170,17 +170,18 @@ paths:
         204:
           description: Operation completed.
 
-        409:
-          description:
-            Operation is already done, eg. joining an already joined room.
+        404:
+          description: |
+            Room does not exist or the user does not have permission for the
+            operation.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
 
-        404:
-          description: |
-            Room does not exist or the user does not have permission for management.
+        409:
+          description:
+            Operation is already done, eg. joining an already joined room.
           content:
             application/json:
               schema:
@@ -271,10 +272,15 @@ paths:
                 type: string
                 description: Newly created item `cid`.
 
-        # FIXME: Distinguish this from 404?
         403:
-          description: |
-            The user does not have permission to post in this room, or the room does not exist.
+          description: The user does not have permission to post in this room.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+
+        404:
+          description: The room does not exist or the user is not a room member.
           content:
             application/json:
               schema:

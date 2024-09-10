@@ -603,7 +603,13 @@ fn get_room_if_readable<T>(
         f,
     )
     .optional()?
-    .ok_or_else(|| error_response!(StatusCode::NOT_FOUND, "not_found", "room not found"))
+    .ok_or_else(|| {
+        error_response!(
+            StatusCode::NOT_FOUND,
+            "not_found",
+            "the room does not exist or the user is not a room member",
+        )
+    })
 }
 
 /// Get room items with pagination parameters,
@@ -675,7 +681,7 @@ async fn room_item_post(
 
     let (cid, txs) = {
         let conn = st.db.get();
-        let Some((uid, _perm)) = conn
+        let (uid, perm) = conn
             .query_row(
                 r"
                 SELECT `uid`, `room_member`.`permission`
@@ -696,14 +702,21 @@ async fn room_item_post(
                 },
             )
             .optional()?
-            .filter(|(_, perm)| perm.contains(MemberPermission::POST_CHAT))
-        else {
+            .ok_or_else(|| {
+                error_response!(
+                    StatusCode::NOT_FOUND,
+                    "not_found",
+                    "the room does not exist or the user is not a room member",
+                )
+            })?;
+
+        if !perm.contains(MemberPermission::POST_CHAT) {
             return Err(error_response!(
                 StatusCode::FORBIDDEN,
                 "permission_denied",
-                "the user does not have permission to post in this room",
+                "the user does not have permission to post item in the room",
             ));
-        };
+        }
 
         let cid = Id::gen();
         conn.execute(
@@ -825,7 +838,7 @@ async fn room_join(
         return Err(error_response!(
             StatusCode::NOT_FOUND,
             "not_found",
-            "room does not exists or user is not allowed to join this room",
+            "the room does not exist or the user is not allowed to join the room",
         ));
     }
 
@@ -866,7 +879,7 @@ async fn room_leave(st: &AppState, rid: Id, user: UserKey) -> Result<(), ApiErro
     let mut conn = st.db.get();
     let txn = conn.transaction()?;
 
-    let Some(uid) = txn
+    let uid = txn
         .query_row(
             r"
             SELECT `uid`
@@ -882,13 +895,14 @@ async fn room_leave(st: &AppState, rid: Id, user: UserKey) -> Result<(), ApiErro
             |row| row.get::<_, u64>("uid"),
         )
         .optional()?
-    else {
-        return Err(error_response!(
-            StatusCode::NOT_FOUND,
-            "not_found",
-            "room does not exists or user is not a room member",
-        ));
-    };
+        .ok_or_else(|| {
+            error_response!(
+                StatusCode::NOT_FOUND,
+                "not_found",
+                "the room does not exist or user is not a room member",
+            )
+        })?;
+
     txn.execute(
         r"
         DELETE FROM `room_member`
@@ -929,7 +943,7 @@ async fn room_item_mark_seen(
         return Err(error_response!(
             StatusCode::NOT_FOUND,
             "not_found",
-            "room does not exists or user is not a room member",
+            "the room does not exist or the user is not a room member",
         ));
     }
     Ok(StatusCode::NO_CONTENT)
