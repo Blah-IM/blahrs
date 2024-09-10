@@ -35,7 +35,7 @@ jobs:
         run: cargo clippy --workspace --all-targets -- -D clippy::dbg_macro -D clippy::todo
 
       - name: Rustdoc
-        run: cargo doc --workspace
+        run: cargo doc --workspace --no-deps
 
   test:
     strategy:
