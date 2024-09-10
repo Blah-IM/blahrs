@@ -309,6 +309,29 @@ impl RichText {
 pub type ChatItem = WithSig<ChatPayload>;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RoomMetadata {
+    /// Room id.
+    pub rid: Id,
+    /// Plain text room title.
+    pub title: String,
+    /// Room attributes.
+    pub attrs: RoomAttrs,
+
+    // Extra information is only available for some APIs.
+    /// The last item in the room.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_item: Option<WithItemId<ChatItem>>,
+    /// The current user's last seen item id.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_seen_cid: Option<Id>,
+    /// The number of unseen messages, ie. the number of items from `last_seen_cid` to
+    /// `last_item.cid`.
+    /// This may or may not be a precise number.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub unseen_cnt: Option<u64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "typ", rename = "create_room")]
 pub struct CreateRoomPayload {
     pub attrs: RoomAttrs,

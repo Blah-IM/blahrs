@@ -233,7 +233,7 @@ async fn room_create_get(server: Server, ref mut rng: impl RngCore, #[case] publ
         } else {
             RoomAttrs::empty()
         },
-        last_chat: None,
+        last_item: None,
         last_seen_cid: None,
         unseen_cnt: None,
     };

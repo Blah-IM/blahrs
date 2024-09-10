@@ -269,11 +269,11 @@ async function loadRoomList(autoJoin) {
             const resp = await fetch(`${serverUrl}/room?filter=${filter}`, await genAuthHeader())
             const json = await resp.json()
             if (resp.status !== 200) throw new Error(`status ${resp.status}: ${json.error.message}`);
-            for (const { rid, title, attrs, last_chat, last_seen_cid } of json.rooms) {
+            for (const { rid, title, attrs, last_item, last_seen_cid } of json.rooms) {
                 const el = document.createElement('option');
                 el.value = rid;
                 el.innerText = `${title} (rid=${rid}, attrs=${attrs})`;
-                if (last_chat !== undefined && last_chat.cid !== last_seen_cid) {
+                if (last_item !== undefined && last_item.cid !== last_seen_cid) {
                     el.innerText += ' (unread)';
                 }
                 targetEl.appendChild(el);

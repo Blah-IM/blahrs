@@ -377,7 +377,7 @@ components:
           description: Room attributes bitset, see `RoomAttrs`.
           type: integer
           format: int64
-        last_chat:
+        last_item:
           $ref: '#/components/schemas/WithItemId-WithSig-Chat'
         last_seen_cid:
           description: The `cid` of the last chat being marked as seen.

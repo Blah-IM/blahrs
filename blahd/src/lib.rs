@@ -12,7 +12,7 @@ use axum::{Json, Router};
 use axum_extra::extract::WithRejection as R;
 use blah_types::{
     ChatItem, ChatPayload, CreateRoomPayload, Id, MemberPermission, RoomAdminOp, RoomAdminPayload,
-    RoomAttrs, ServerPermission, Signee, UserKey, WithItemId, WithSig,
+    RoomAttrs, RoomMetadata, ServerPermission, Signee, UserKey, WithItemId, WithSig,
 };
 use config::ServerConfig;
 use ed25519_dalek::SIGNATURE_LENGTH;
@@ -138,7 +138,7 @@ async fn handle_ws(State(st): ArcState, ws: WebSocketUpgrade) -> Response {
     })
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RoomList {
     pub rooms: Vec<RoomMetadata>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -189,7 +189,7 @@ async fn room_list(
                 let rid = row.get("rid")?;
                 let title = row.get("title")?;
                 let attrs = row.get("attrs")?;
-                let last_chat = row
+                let last_item = row
                     .get::<_, Option<Id>>("cid")?
                     .map(|cid| {
                         Ok::<_, rusqlite::Error>(WithItemId {
@@ -216,7 +216,7 @@ async fn room_list(
                     rid,
                     title,
                     attrs,
-                    last_chat,
+                    last_item,
                     last_seen_cid,
                     unseen_cnt,
                 })
@@ -439,20 +439,21 @@ async fn room_get_metadata(
     R(Path(rid), _): RE<Path<Id>>,
     auth: MaybeAuth,
 ) -> Result<Json<RoomMetadata>, ApiError> {
-    let (title, attrs) =
-        get_room_if_readable(&st.db.get(), rid, auth.into_optional()?.as_ref(), |row| {
-            Ok((
-                row.get::<_, String>("title")?,
-                row.get::<_, RoomAttrs>("attrs")?,
-            ))
-        })?;
+    let conn = st.db.get();
+    let (title, attrs) = get_room_if_readable(&conn, rid, auth.into_optional()?.as_ref(), |row| {
+        Ok((
+            row.get::<_, String>("title")?,
+            row.get::<_, RoomAttrs>("attrs")?,
+        ))
+    })?;
 
     Ok(Json(RoomMetadata {
         rid,
         title,
         attrs,
+
         // TODO: Should we include these here?
-        last_chat: None,
+        last_item: None,
         last_seen_cid: None,
         unseen_cnt: None,
     }))
@@ -558,23 +559,6 @@ struct FeedItemExtra {
     nonce: u32,
     #[serde(with = "hex::serde")]
     sig: [u8; SIGNATURE_LENGTH],
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct RoomMetadata {
-    pub rid: Id,
-    pub title: String,
-    pub attrs: RoomAttrs,
-
-    // Optional extra information. Only included by the room list response.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub last_chat: Option<WithItemId<ChatItem>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub last_seen_cid: Option<Id>,
-    /// The number of unseen messages. Only available for `room_list` response with
-    /// "filter=unseen".
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub unseen_cnt: Option<u64>,
 }
 
 fn get_room_if_readable<T>(
