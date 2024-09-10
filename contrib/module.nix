@@ -38,7 +38,7 @@ let
         default = "/var/lib/blahd/db.sqlite";
       };
 
-      server.listen = mkOption {
+      listen.address = mkOption {
         type = types.str;
         example = "localhost:8080";
       };
