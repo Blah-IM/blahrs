@@ -6,7 +6,7 @@ info:
 paths:
   /ws:
     get:
-      summary: WebSocket endpoint.
+      summary: WebSocket endpoint
       description: |
         Once connection, client must send a JSON text message of type
         `WithSig<AuthPayload>` for authentication.
@@ -18,89 +18,106 @@ paths:
 
   /room:
     get:
-      summary: List rooms on the server
+      summary: List rooms
       parameters:
-        filter:
+        - name: filter
           in: query
           required: true
+          schema:
+            enum:
+              - public
+              - joined
+              - unseen
           description: |
             Must be one of following values:
             - "public": list all public rooms on the server.
             - "joined": list rooms the user have joined.
+              Requires `Authorization`.
             - "unseen": list rooms the user have joined and have unseen
               messages.
-        top:
+              Requires `Authorization`.
+
+        - name: top
           in: query
+          schema:
+            type: string
           description:
             The maximum number of items returned in each page. This is only an
             advice and server can clamp it to a smaller value.
-        skipToken:
+
+        - name: skipToken
           in: query
+          schema:
+            type: string
           description:
             The page token returned from a previous list response to fetch the
             next page. NB. Other parameters (eg. `joined` and `page_len`)
             should be included (as the same value) for each page fetch.
-      headers:
-        Authorization:
-          description: |
-            Proof of membership for private rooms.
-            Required if `filter` is other than "public".
-          required: false
+
+        - name: Authorization
+          in: header
+          description: Optional proof of membership for private rooms.
           schema:
-            $ret: WithSig<AuthPayload>
+            $ref: '#/components/schemas/WithSig-Auth'
+
       responses:
         200:
+          description: Filtered and paged rooms.
           content:
             application/json:
-              $ref: '#/components/schema/RoomList'
+              schema:
+                $ref: '#/components/schemas/RoomList'
+
         401:
           description: Missing or invalid Authorization header.
           content:
             application/json:
-              $ref: '#/components/schemas/ApiError'
+              schema:
+                $ref: '#/components/schemas/ApiError'
 
   /room/create:
     post:
-      summary: Create a new room
+      summary: Create room
       requestBody:
         content:
           application/json:
             schema:
-              $ref: WithSig<CreateRoomPayload>
-              example:
-                sig: 99a77e836538268839ed3419c649eefb043cb51d448f641cc2a1c523811aab4aacd09f92e7c0688ffd659bfc6acb764fea79979a491e132bf6a56dd23adc1d09
-                signee:
-                  nonce: 670593955
-                  payload:
-                    typ: create_room
-                    attrs: 1 # PUBLIC_READABLE
-                    title: 'hello room'
-                    members:
-                      - user: 83ce46ced47ec0391c64846cbb6c507250ead4985b6a044d68751edc46015dd7
-                        permission: -1
-                  timestamp: 1724966284
-                  user: 83ce46ced47ec0391c64846cbb6c507250ead4985b6a044d68751edc46015dd7
+              $ref: '#/components/schemas/WithSig-CreateRoom'
+
       responses:
         200:
+          description: Room created.
           content:
             application/json:
-              type: string
-              description: Id of the newly created room (rid).
+              schema:
+                type: string
+                description: Newly created room `rid`.
+
         403:
           description: The user does not have permission to create room.
           content:
             application/json:
-              $ref: '#/components/schemas/ApiError'
+              schema:
+                $ref: '#/components/schemas/ApiError'
 
   /room/{rid}:
     get:
       summary: Get room metadata
+      parameters:
+        - name: Authorization
+          in: header
+          description: Optional proof of membership for private rooms.
+          schema:
+            $ref: '#/components/schemas/WithSig-Auth'
+
       responses:
         200:
+          description: The metadata of the specified room.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/RoomMetadata'
+
         404:
           description: |
             Room does not exist or the user does not have permission to get metadata of it.
@@ -109,138 +126,28 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiError'
 
-
-  /room/{rid}/feed.json:
-    get:
-      summary: JSON feed of room {rid}, which must be public readable
-      description: For human and feed reader consumption only.
-      responses:
-        200:
-          text/feed+json:
-            scheme:
-              $ref: 'https://www.jsonfeed.org/version/1.1/'
-        404:
-          description: Room does not exist or is private.
-          content:
-            application/json:
-              $ref: '#/components/schemas/ApiError'
-
-  /room/{rid}/item:
-    get:
-      summary: Get chat history for room {rid}
-      description: |
-        Return chat items in reversed time order, up to PAGE_LEN items.
-        The last (oldest) chat id can be used as query parameter for the next
-        GET, to repeatedly fetch full history.
-      headers:
-        Authorization:
-          description: Proof of membership for private rooms.
-          required: false
-          schema:
-            $ret: WithSig<AuthPayload>
-      parameters:
-        top:
-          in: query
-          description: |
-            The maximum number of items to return. This is an advice and may be
-            ignored by server.
-        skipToken:
-          in: query
-          description: |
-            Retrieve the next page of items, by providing the last item's `cid`
-            from the previous response.
-      responses:
-        200:
-          content:
-            application/json:
-              x-description: TODO
-        404:
-          description: |
-            Room does not exist or the user does not have permission to read it.
-          content:
-            application/json:
-              $ref: '#/components/schemas/ApiError'
-
+  /room/{rid}/admin:
     post:
-      summary: Post a chat in room {rid}
+      summary: Room management
+
       requestBody:
         content:
           application/json:
             schema:
-              $ref: WithItemId<WithSig<ChatPayload>>
-              example:
-                sig: 99a77e836538268839ed3419c649eefb043cb51d448f641cc2a1c523811aab4aacd09f92e7c0688ffd659bfc6acb764fea79979a491e132bf6a56dd23adc1d09
-                signee:
-                  nonce: 670593955
-                  payload:
-                    typ: chat
-                    room: 7ed9e067-ec37-4054-9fc2-b1bd890929bd
-                    rich_text: ["before ",["bold ",{"b":true}],["italic bold ",{"b":true,"i":true}],"end"]
-                  timestamp: 1724966284
-                  user: 83ce46ced47ec0391c64846cbb6c507250ead4985b6a044d68751edc46015dd7
-      responses:
-        200:
-          content:
-            application/json:
-              type: string
-              description: Created chat id (cid).
-        400:
-          description: Body is invalid or fails the verification.
-          content:
-            application/json:
-              $ref: '#/components/schemas/ApiError'
-        403:
-          description: |
-            The user does not have permission to post in this room, or the room does not exist.
-          content:
-            application/json:
-              $ref: '#/components/schemas/ApiError'
+              $ref: '#/components/schemas/WithSig-RoomAdmin'
 
-  /room/{rid}/item/{cid}/seen:
-    post:
-      summary: Mark item {cid} in room {rid} seen by the current user.
-      description:
-        Server will enforce that last seen item does not go backward. Marking
-        an older item seen or sending the same request multiple times will be a
-        no-op.
-      headers:
-        Authorization:
-          description: Proof of membership for private rooms.
-          schema:
-            $ret: WithSig<AuthPayload>
       responses:
         204:
           description: Operation completed.
-        404:
-          description: |
-            Room does not exist or the user is not in the room.
+
+        409:
+          description:
+            Operation is already done, eg. joining an already joined room.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
 
-  /room/{rid}/admin:
-    post:
-      summary: Room management
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: WithSig<AdminPayload>
-              example:
-                sig: 99a77e836538268839ed3419c649eefb043cb51d448f641cc2a1c523811aab4aacd09f92e7c0688ffd659bfc6acb764fea79979a491e132bf6a56dd23adc1d09
-                signee:
-                  nonce: 670593955
-                  payload:
-                    permission: 1
-                    room: 7ed9e067-ec37-4054-9fc2-b1bd890929bd
-                    typ: add_member
-                    user: 83ce46ced47ec0391c64846cbb6c507250ead4985b6a044d68751edc46015dd7
-                  timestamp: 1724966284
-                  user: 83ce46ced47ec0391c64846cbb6c507250ead4985b6a044d68751edc46015dd7
-      responses:
-        204:
-          description: Operation completed.
         404:
           description: |
             Room does not exist or the user does not have permission for management.
@@ -249,6 +156,132 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiError'
 
+  /room/{rid}/feed.json:
+    get:
+      summary: Get JSON feed of room
+      description: |
+        Get room {rid}'s content in JSON feed v1.1 format. The room must be
+        public. For human and feed reader consumption only.
+      responses:
+        200:
+          description: The JSON feed.
+          content:
+            text/feed+json:
+              schema:
+                $ref: 'https://www.jsonfeed.org/version/1.1/'
+
+        404:
+          description: Room does not exist or is private.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+
+  /room/{rid}/item:
+    get:
+      summary: List items in room
+      description: |
+        Return items in reversed time order, up to `skipToken` items in a
+        single response, from room {rid}.
+        The last (oldest) chat `cid` will be returned as `skipToken` in
+        response, which can be used as query parameter for the next GET, to
+        repeatedly fetch more history.
+
+      parameters:
+        - name: Authorization
+          in: header
+          description: Optional proof of membership for private rooms.
+          schema:
+            $ref: '#/components/schemas/WithSig-Auth'
+
+        - name: top
+          in: query
+          schema:
+            type: integer
+          description: |
+            The maximum number of items to return. This is an advice and may be
+            further clamped by the server. It must not be zero.
+
+        - name: skipToken
+          in: query
+          schema:
+            type: string
+          description: |
+            Return items after (older than) an existing `cid`. Useful for
+            pagination.
+
+      responses:
+        200:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RoomItems'
+
+        404:
+          description: |
+            Room does not exist or the user does not have permission to read it.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+
+    post:
+      summary: Post item in room
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WithSig-Chat'
+
+      responses:
+        200:
+          content:
+            application/json:
+              schema:
+                type: string
+                description: Newly created item `cid`.
+
+        # FIXME: Distinguish this from 404?
+        403:
+          description: |
+            The user does not have permission to post in this room, or the room does not exist.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+
+  /room/{rid}/item/{cid}/seen:
+    post:
+      summary: Mark item seen
+      description: |
+        Mark item {cid} in room {rid} seen by the current user.
+
+        Server may enforce that last seen item does not go backward. Marking
+        an older item seen or sending the same request multiple times can be a
+        no-op.
+
+      parameters:
+        - name: Authorization
+          in: header
+          required: true
+          description: Proof of membership for private rooms.
+          schema:
+            $ref: '#/components/schemas/WithSig-Auth'
+
+      responses:
+        204:
+          description: Operation completed.
+
+        404:
+          description: |
+            Room does not exist or the user is not in the room.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+
+# Ideally we should generate these from src, but we need to
+# WAIT: https://github.com/juhaku/utoipa/pull/1034
 components:
   schemas:
     ApiError:
@@ -259,8 +292,12 @@ components:
           properties:
             code:
               type: string
+              description: A machine-readable error code string.
+              example: invalid_signature
             message:
               type: string
+              description: A human-readable error message.
+              example: signature verification failed
 
     RoomList:
       type: object
@@ -284,21 +321,32 @@ components:
         title:
           type: string
         attrs:
-          type: int64
+          description: Room attributes bitset, see `RoomAttrs`.
+          type: integer
+          format: int64
         last_chat:
-          $ref: 'WithItemId<WithSig<ChatPayload>>'
+          $ref: '#/components/schemas/WithItemId-WithSig-Chat'
         last_seen_cid:
+          description: The `cid` of the last chat being marked as seen.
           type: string
+        unseen_cnt:
+          description: |
+            The number of unseen messages. Only available for
+            GET `/room?filter=unseen`.
+          type: integer
+          format: uint64
 
     RoomMetadata:
       type: object
+      required: ['rid', 'title', 'attrs']
       properties:
         rid:
           type: string
         title:
           type: string
         attrs:
-          type: int64
+          type: integer
+          format: int64
 
     RoomItems:
       type: object
@@ -306,8 +354,200 @@ components:
         - items
       properties:
         items:
+          description: Room items in reversed server-received time order.
           type: array
           items:
-            $ref: 'WithItemId<WithSig<ChatPayload>>'
+            $ref: '#/components/schemas/WithItemId-WithSig-Chat'
         skip_token:
+          description: The token for fetching the next page.
           type: string
+
+    RichText:
+      type: array
+      items:
+        anyOf:
+          - type: string
+            description: Unstyled text piece.
+          - type: array
+            items: false
+            prefixItems:
+              - type: string
+                description: The text piece to apply styles on.
+              - type: object
+                properties:
+                  b:
+                    type: boolean
+                    description: Bold.
+                  m:
+                    type: boolean
+                    description: Monospace.
+                  i:
+                    type: boolean
+                    description: Italic.
+                  s:
+                    type: boolean
+                    description: Strikethrough.
+                  u:
+                    type: boolean
+                    description: Underline.
+                  hashtag:
+                    type: boolean
+                    description: Hashtag.
+                  link:
+                    type: string
+                    description: Link target.
+
+
+    WithSig-Auth:
+      type: object
+      properties:
+        sig:
+          type: string
+        signee:
+          type: object
+          properties:
+            nonce:
+              type: integer
+              format: uint32
+            payload:
+              type: object
+              properties:
+                typ:
+                  type: string
+                  const: 'auth'
+
+    WithSig-RoomAdmin:
+      type: object
+      properties:
+        sig:
+          type: string
+        signee:
+          type: object
+          properties:
+            nonce:
+              type: integer
+              format: uint32
+            payload:
+              oneOf:
+
+                - description: Add member to the room.
+                  type: object
+                  properties:
+                    typ:
+                      type: string
+                      const: 'add_member'
+                    room:
+                      type: string
+                    permission:
+                      type: integer
+                      format: uint64
+                    user:
+                      type: string
+
+                - description: Remove member from the room.
+                  type: object
+                  properties:
+                    typ:
+                      type: string
+                      const: 'remove_member'
+                    room:
+                      type: string
+                    user:
+                      type: string
+
+
+      example:
+        sig: 99a77e836538268839ed3419c649eefb043cb51d448f641cc2a1c523811aab4aacd09f92e7c0688ffd659bfc6acb764fea79979a491e132bf6a56dd23adc1d09
+        signee:
+          nonce: 670593955
+          payload:
+            permission: 1
+            room: 7ed9e067-ec37-4054-9fc2-b1bd890929bd
+            typ: add_member
+            user: 83ce46ced47ec0391c64846cbb6c507250ead4985b6a044d68751edc46015dd7
+          timestamp: 1724966284
+          user: 83ce46ced47ec0391c64846cbb6c507250ead4985b6a044d68751edc46015dd7
+
+    WithSig-Chat:
+      type: object
+      properties:
+        sig:
+          type: string
+        signee:
+          type: object
+          properties:
+            nonce:
+              type: integer
+              format: uint32
+            payload:
+              type: object
+              properties:
+                typ:
+                  type: string
+                  const: 'chat'
+                room:
+                  type: string
+                rich_text:
+                  $ref: '$/components/schemas/RichText'
+      example:
+        sig: 99a77e836538268839ed3419c649eefb043cb51d448f641cc2a1c523811aab4aacd09f92e7c0688ffd659bfc6acb764fea79979a491e132bf6a56dd23adc1d09
+        signee:
+          nonce: 670593955
+          payload:
+            typ: chat
+            room: 7ed9e067-ec37-4054-9fc2-b1bd890929bd
+            rich_text: ["before ",["bold ",{"b":true}],["italic bold ",{"b":true,"i":true}],"end"]
+          timestamp: 1724966284
+          user: 83ce46ced47ec0391c64846cbb6c507250ead4985b6a044d68751edc46015dd7
+
+    WithItemId-WithSig-Chat:
+      allOf:
+        - $ref: '#/components/schemas/WithSig-Chat'
+        - type: object
+          properties:
+            cid:
+              type: string
+              description: An opaque server-specific item identifier.
+
+    WithSig-CreateRoom:
+      type: object
+      properties:
+        sig:
+          type: string
+        signee:
+          type: object
+          properties:
+            nonce:
+              type: integer
+              format: uint32
+            payload:
+              type: object
+              properties:
+                typ:
+                  type: string
+                  const: 'create_room'
+                title:
+                  type: string
+                members:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      user:
+                        type: string
+                      permission:
+                        type: integer
+                        format: int64
+      example:
+        sig: 99a77e836538268839ed3419c649eefb043cb51d448f641cc2a1c523811aab4aacd09f92e7c0688ffd659bfc6acb764fea79979a491e132bf6a56dd23adc1d09
+        signee:
+          nonce: 670593955
+          payload:
+            typ: create_room
+            attrs: 1 # PUBLIC_READABLE
+            title: 'hello room'
+            members:
+              - user: 83ce46ced47ec0391c64846cbb6c507250ead4985b6a044d68751edc46015dd7
+                permission: -1
+          timestamp: 1724966284
+          user: 83ce46ced47ec0391c64846cbb6c507250ead4985b6a044d68751edc46015dd7
