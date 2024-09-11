@@ -56,9 +56,9 @@ jobs:
           rustup update --no-self-update ${{ matrix.rust }}
           rustup default ${{ matrix.rust }}
 
-      - name: Disable integration tests on stable rustc
+      - name: Disable webapi tests on stable rustc
         if: matrix.rust == 'stable'
-        run: mv ./blahd/tests{,-disabled}
+        run: rm ./blahd/tests/webapi.rs
 
       - name: Cache Dependencies
         uses: Swatinem/rust-cache@v2
