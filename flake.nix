@@ -65,6 +65,9 @@ rec {
                   "--package=blahctl"
                 ];
 
+              # Intentionally omit the socket unit. It is trivial but
+              # highly configuration-specific. Users who want to use it almost
+              # always need customization.
               postInstall = ''
                 mkdir -p $out/etc/systemd/system
                 substitute ./contrib/blahd.example.service $out/etc/systemd/system/blahd.service \

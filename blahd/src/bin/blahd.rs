@@ -1,7 +1,9 @@
+use std::net::TcpListener;
+use std::os::fd::FromRawFd;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use anyhow::{Context, Result};
+use anyhow::{anyhow, Context, Result};
 use blahd::config::{Config, ListenConfig};
 use blahd::{AppState, Database};
 
@@ -53,14 +55,32 @@ fn main() -> Result<()> {
 }
 
 async fn main_serve(db: Database, config: Config) -> Result<()> {
-    let listener = match &config.listen {
-        ListenConfig::Address(addr) => tokio::net::TcpListener::bind(addr)
-            .await
-            .context("failed to listen on socket")?,
-    };
     let st = AppState::new(db, config.server);
 
-    tracing::info!("listening on {:?}", config.listen);
+    let listener = match &config.listen {
+        ListenConfig::Address(addr) => {
+            tracing::info!("listening on {addr:?}");
+            tokio::net::TcpListener::bind(addr)
+                .await
+                .context("failed to listen on socket")?
+        }
+        ListenConfig::Systemd(_) => {
+            tracing::info!("listening on fd from environment");
+            let [fd] = sd_notify::listen_fds()
+                .context("failed to get fds from sd_listen_fds(3)")?
+                .collect::<Vec<_>>()
+                .try_into()
+                .map_err(|_| anyhow!("more than one fds available from sd_listen_fds(3)"))?;
+            // SAFETY: `fd` is valid by sd_listen_fds(3) protocol.
+            let listener = unsafe { TcpListener::from_raw_fd(fd) };
+            listener
+                .set_nonblocking(true)
+                .context("failed to set socket non-blocking")?;
+            tokio::net::TcpListener::from_std(listener)
+                .context("failed to register async socket")?
+        }
+    };
+
     let router = blahd::router(Arc::new(st));
     let _ = sd_notify::notify(true, &[sd_notify::NotifyState::Ready]);
 

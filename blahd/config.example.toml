@@ -1,6 +1,6 @@
 # The example configuration file, required options are documented as
 # `(Required)`, other options are optional and the example value given here is
-# the default value.
+# the default value, or example values for commented lines.
 
 [database]
 # If enabled, a in-memory non-persistent database is used instead. Options
@@ -16,10 +16,15 @@ path = "/var/lib/blahd/db.sqlite"
 # Note that parent directory will never be created and must already exist.
 create = true
 
+# Listener socket configuration. (Required)
+# There must be exact one option under this section being set.
 [listen]
-# (Required)
-# The local address to listen on.
+# Listen on an address.
 address = "localhost:8080"
+
+# Use systemd socket activation mechanism to get listener fd from envvars.
+# See also sd_listen_fds(3) and systemd.socket(5).
+#systemd = true
 
 [server]
 # (Required)

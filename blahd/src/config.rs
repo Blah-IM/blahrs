@@ -4,6 +4,7 @@ use std::time::Duration;
 
 use anyhow::{ensure, Result};
 use serde::{Deserialize, Deserializer, Serialize};
+use serde_constant::ConstBool;
 use serde_inline_default::serde_inline_default;
 use url::Url;
 
@@ -31,7 +32,7 @@ pub struct DatabaseConfig {
 #[serde(rename_all = "snake_case")]
 pub enum ListenConfig {
     Address(String),
-    // TODO: Unix socket.
+    Systemd(ConstBool<true>),
 }
 
 #[serde_inline_default]
