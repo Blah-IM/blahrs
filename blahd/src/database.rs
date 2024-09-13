@@ -1,16 +1,38 @@
 use std::ops::DerefMut;
+use std::path::PathBuf;
 
 use anyhow::{ensure, Context, Result};
 use parking_lot::Mutex;
 use rusqlite::{params, Connection, OpenFlags};
+use serde::Deserialize;
+use serde_inline_default::serde_inline_default;
 
-use crate::config::DatabaseConfig;
+const DEFAULT_DATABASE_PATH: &str = "/var/lib/blahd/db.sqlite";
 
 static INIT_SQL: &str = include_str!("../schema.sql");
 
 // Simple and stupid version check for now.
 // `echo -n 'blahd-database-0' | sha256sum | head -c5` || version
 const APPLICATION_ID: i32 = 0xd9e_8404;
+
+#[serde_inline_default]
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Config {
+    pub in_memory: bool,
+    pub path: PathBuf,
+    pub create: bool,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            in_memory: false,
+            path: DEFAULT_DATABASE_PATH.into(),
+            create: true,
+        }
+    }
+}
 
 #[derive(Debug)]
 pub struct Database {
@@ -25,7 +47,7 @@ impl Database {
         Ok(Self { conn: conn.into() })
     }
 
-    pub fn open(config: &DatabaseConfig) -> Result<Self> {
+    pub fn open(config: &Config) -> Result<Self> {
         let mut conn = if config.in_memory {
             Connection::open_in_memory().context("failed to open in-memory database")?
         } else {

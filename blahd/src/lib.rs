@@ -15,13 +15,13 @@ use blah_types::{
     RoomAdminPayload, RoomAttrs, RoomMetadata, ServerPermission, Signed, SignedChatMsg, Signee,
     UserKey, WithMsgId,
 };
-use config::ServerConfig;
 use ed25519_dalek::SIGNATURE_LENGTH;
 use id::IdExt;
 use middleware::{Auth, MaybeAuth, ResultExt as _, SignedJson};
 use parking_lot::Mutex;
 use rusqlite::{named_params, params, Connection, OptionalExtension, Row, ToSql};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
+use serde_inline_default::serde_inline_default;
 use url::Url;
 use utils::ExpiringSet;
 
@@ -35,6 +35,35 @@ mod utils;
 
 pub use database::Database;
 pub use middleware::ApiError;
+
+#[serde_inline_default]
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ServerConfig {
+    #[serde(deserialize_with = "de_base_url")]
+    pub base_url: Url,
+
+    #[serde_inline_default(1024.try_into().expect("not zero"))]
+    pub max_page_len: NonZeroUsize,
+    #[serde_inline_default(4096)] // 4KiB
+    pub max_request_len: usize,
+
+    #[serde_inline_default(90)]
+    pub timestamp_tolerance_secs: u64,
+
+    #[serde(default)]
+    pub ws: event::Config,
+}
+
+fn de_base_url<'de, D: Deserializer<'de>>(de: D) -> Result<Url, D::Error> {
+    let url = Url::deserialize(de)?;
+    if url.cannot_be_a_base() {
+        return Err(serde::de::Error::custom(
+            "base_url must be able to be a base",
+        ));
+    }
+    Ok(url)
+}
 
 // Locks must be grabbed in the field order.
 #[derive(Debug)]

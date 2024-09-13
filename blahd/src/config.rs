@@ -1,31 +1,15 @@
-use std::num::NonZeroUsize;
-use std::path::PathBuf;
-use std::time::Duration;
-
-use anyhow::{ensure, Result};
-use serde::{Deserialize, Deserializer, Serialize};
+use serde::{Deserialize, Serialize};
 use serde_constant::ConstBool;
-use serde_inline_default::serde_inline_default;
-use url::Url;
+
+use crate::{database, ServerConfig};
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
-    pub database: DatabaseConfig,
+    #[serde(default)]
+    pub database: database::Config,
     pub listen: ListenConfig,
     pub server: ServerConfig,
-}
-
-#[serde_inline_default]
-#[derive(Debug, Clone, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct DatabaseConfig {
-    #[serde_inline_default(false)]
-    pub in_memory: bool,
-    #[serde_inline_default("/var/lib/blahd/db.sqlite".into())]
-    pub path: PathBuf,
-    #[serde_inline_default(true)]
-    pub create: bool,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -35,52 +19,35 @@ pub enum ListenConfig {
     Systemd(ConstBool<true>),
 }
 
-#[serde_inline_default]
-#[derive(Debug, Clone, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ServerConfig {
-    pub base_url: Url,
-
-    #[serde_inline_default(1024.try_into().expect("not zero"))]
-    pub max_page_len: NonZeroUsize,
-    #[serde_inline_default(4096)] // 4KiB
-    pub max_request_len: usize,
-
-    #[serde_inline_default(90)]
-    pub timestamp_tolerance_secs: u64,
-
-    #[serde_inline_default(Duration::from_secs(15))]
-    #[serde(deserialize_with = "de_duration_sec")]
-    pub ws_auth_timeout_sec: Duration,
-    #[serde_inline_default(Duration::from_secs(15))]
-    #[serde(deserialize_with = "de_duration_sec")]
-    pub ws_send_timeout_sec: Duration,
-    #[serde_inline_default(1024)]
-    pub ws_event_queue_len: usize,
-}
-
-fn de_duration_sec<'de, D: Deserializer<'de>>(de: D) -> Result<Duration, D::Error> {
-    <u64>::deserialize(de).map(Duration::from_secs)
-}
-
-impl Config {
-    pub fn validate(&self) -> Result<()> {
-        ensure!(
-            !self.server.base_url.cannot_be_a_base(),
-            "base_url must be able to be a base",
-        );
-        Ok(())
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn example_config() {
+    fn example() {
         let src = std::fs::read_to_string("config.example.toml").unwrap();
-        let config = toml::from_str::<Config>(&src).unwrap();
-        config.validate().unwrap();
+        let _config = toml::from_str::<Config>(&src).unwrap();
+    }
+
+    #[test]
+    fn minimal_address() {
+        let src = r#"
+[server]
+base_url = "http://localhost"
+[listen]
+address = "localhost:8080"
+        "#;
+        let _config = toml::from_str::<Config>(src).unwrap();
+    }
+
+    #[test]
+    fn minimal_systemd() {
+        let src = r#"
+[server]
+base_url = "http://localhost"
+[listen]
+systemd = true
+        "#;
+        let _config = toml::from_str::<Config>(src).unwrap();
     }
 }

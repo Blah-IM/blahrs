@@ -33,7 +33,6 @@ fn main() -> Result<()> {
     fn parse_config(path: &std::path::Path) -> Result<Config> {
         let src = std::fs::read_to_string(path)?;
         let config = toml::from_str::<Config>(&src)?;
-        config.validate()?;
         Ok(config)
     }
 
