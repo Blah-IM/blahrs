@@ -5,7 +5,7 @@ use std::{fs, io};
 use anyhow::{Context, Result};
 use blah_types::{
     bitflags, get_timestamp, ChatPayload, CreateGroup, CreateRoomPayload, Id, MemberPermission,
-    RichText, RoomAttrs, RoomMember, RoomMemberList, ServerPermission, UserKey, WithSig,
+    RichText, RoomAttrs, RoomMember, RoomMemberList, ServerPermission, Signed, UserKey,
 };
 use ed25519_dalek::pkcs8::spki::der::pem::LineEnding;
 use ed25519_dalek::pkcs8::{DecodePrivateKey, DecodePublicKey, EncodePrivateKey, EncodePublicKey};
@@ -227,7 +227,7 @@ async fn main_api(api_url: Url, command: ApiCommand) -> Result<()> {
                     user: UserKey(key.verifying_key().to_bytes()),
                 }]),
             });
-            let payload = WithSig::sign(&key, get_timestamp(), &mut OsRng, payload)?;
+            let payload = Signed::sign(&key, get_timestamp(), &mut OsRng, payload)?;
 
             let ret = client
                 .post(api_url.join("/room/create")?)
@@ -249,10 +249,10 @@ async fn main_api(api_url: Url, command: ApiCommand) -> Result<()> {
                 room: Id(room),
                 rich_text: RichText::from(text),
             };
-            let payload = WithSig::sign(&key, get_timestamp(), &mut OsRng, payload)?;
+            let payload = Signed::sign(&key, get_timestamp(), &mut OsRng, payload)?;
 
             let ret = client
-                .post(api_url.join(&format!("/room/{room}/item"))?)
+                .post(api_url.join(&format!("/room/{room}/msg"))?)
                 .json(&payload)
                 .send()
                 .await?

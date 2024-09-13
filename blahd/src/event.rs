@@ -8,7 +8,7 @@ use std::task::{Context, Poll};
 
 use anyhow::{bail, Context as _, Result};
 use axum::extract::ws::{Message, WebSocket};
-use blah_types::{AuthPayload, SignedChatMsg, WithSig};
+use blah_types::{AuthPayload, Signed, SignedChatMsg};
 use futures_util::future::Either;
 use futures_util::stream::SplitSink;
 use futures_util::{stream_select, SinkExt as _, Stream, StreamExt};
@@ -113,7 +113,7 @@ pub async fn handle_ws(st: Arc<AppState>, ws: &mut WebSocket) -> Result<Infallib
             .await
             .context("authentication timeout")?
             .ok_or(StreamEnded)??;
-        let auth = serde_json::from_str::<WithSig<AuthPayload>>(&payload)?;
+        let auth = serde_json::from_str::<Signed<AuthPayload>>(&payload)?;
         st.verify_signed_data(&auth)?;
 
         st.db

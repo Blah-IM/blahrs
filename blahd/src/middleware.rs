@@ -6,7 +6,7 @@ use axum::extract::{FromRef, FromRequest, FromRequestParts, Request};
 use axum::http::{header, request, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::{async_trait, Json};
-use blah_types::{AuthPayload, UserKey, WithSig};
+use blah_types::{AuthPayload, Signed, UserKey};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
@@ -95,7 +95,7 @@ impl From<rusqlite::Error> for ApiError {
 
 /// Extractor for verified JSON payload.
 #[derive(Debug)]
-pub struct SignedJson<T>(pub WithSig<T>);
+pub struct SignedJson<T>(pub Signed<T>);
 
 #[async_trait]
 impl<S, T> FromRequest<S> for SignedJson<T>
@@ -107,7 +107,7 @@ where
     type Rejection = ApiError;
 
     async fn from_request(req: Request, state: &S) -> Result<Self, Self::Rejection> {
-        let Json(data) = <Json<WithSig<T>> as FromRequest<S>>::from_request(req, state).await?;
+        let Json(data) = <Json<Signed<T>> as FromRequest<S>>::from_request(req, state).await?;
         let st = <Arc<AppState>>::from_ref(state);
         st.verify_signed_data(&data)?;
         Ok(Self(data))
@@ -178,7 +178,7 @@ where
 
         let st = <Arc<AppState>>::from_ref(state);
         let data =
-            serde_json::from_slice::<WithSig<AuthPayload>>(auth.as_bytes()).map_err(|err| {
+            serde_json::from_slice::<Signed<AuthPayload>>(auth.as_bytes()).map_err(|err| {
                 AuthRejection::Invalid(error_response!(
                     StatusCode::BAD_REQUEST,
                     "deserialization",

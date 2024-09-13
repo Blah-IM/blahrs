@@ -9,7 +9,7 @@ use anyhow::Result;
 use blah_types::{
     get_timestamp, AuthPayload, ChatPayload, CreateGroup, CreatePeerChat, CreateRoomPayload, Id,
     MemberPermission, RichText, RoomAdminOp, RoomAdminPayload, RoomAttrs, RoomMember,
-    RoomMemberList, RoomMetadata, ServerPermission, SignedChatMsg, UserKey, WithMsgId, WithSig,
+    RoomMemberList, RoomMetadata, ServerPermission, Signed, SignedChatMsg, UserKey, WithMsgId,
 };
 use blahd::{ApiError, AppState, Database, RoomList, RoomMsgs};
 use ed25519_dalek::SigningKey;
@@ -241,8 +241,8 @@ async fn smoke(server: Server) {
     assert_eq!(got, exp);
 }
 
-fn sign<T: Serialize>(key: &SigningKey, rng: &mut dyn RngCore, payload: T) -> WithSig<T> {
-    WithSig::sign(key, get_timestamp(), rng, payload).unwrap()
+fn sign<T: Serialize>(key: &SigningKey, rng: &mut dyn RngCore, payload: T) -> Signed<T> {
+    Signed::sign(key, get_timestamp(), rng, payload).unwrap()
 }
 
 fn auth(key: &SigningKey, rng: &mut impl RngCore) -> String {

@@ -12,8 +12,8 @@ use axum::{Json, Router};
 use axum_extra::extract::WithRejection as R;
 use blah_types::{
     ChatPayload, CreateGroup, CreatePeerChat, CreateRoomPayload, Id, MemberPermission, RoomAdminOp,
-    RoomAdminPayload, RoomAttrs, RoomMetadata, ServerPermission, SignedChatMsg, Signee, UserKey,
-    WithMsgId, WithSig,
+    RoomAdminPayload, RoomAttrs, RoomMetadata, ServerPermission, Signed, SignedChatMsg, Signee,
+    UserKey, WithMsgId,
 };
 use config::ServerConfig;
 use ed25519_dalek::SIGNATURE_LENGTH;
@@ -59,7 +59,7 @@ impl AppState {
         }
     }
 
-    fn verify_signed_data<T: Serialize>(&self, data: &WithSig<T>) -> Result<(), ApiError> {
+    fn verify_signed_data<T: Serialize>(&self, data: &Signed<T>) -> Result<(), ApiError> {
         let Ok(()) = data.verify() else {
             return Err(error_response!(
                 StatusCode::BAD_REQUEST,

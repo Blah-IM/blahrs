@@ -60,7 +60,7 @@ impl fmt::Display for UserKey {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct WithSig<T> {
+pub struct Signed<T> {
     #[serde(with = "hex::serde")]
     pub sig: [u8; SIGNATURE_LENGTH],
     pub signee: Signee<T>,
@@ -82,7 +82,7 @@ pub fn get_timestamp() -> u64 {
         .as_secs()
 }
 
-impl<T: Serialize> WithSig<T> {
+impl<T: Serialize> Signed<T> {
     /// Sign the payload with the given `key`.
     pub fn sign(
         key: &SigningKey,
@@ -308,7 +308,7 @@ impl RichText {
     }
 }
 
-pub type SignedChatMsg = WithSig<ChatPayload>;
+pub type SignedChatMsg = Signed<ChatPayload>;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RoomMetadata {
@@ -551,7 +551,7 @@ mod tests {
         let mut fake_rng = rand::rngs::mock::StepRng::new(0x42, 1);
         let signing_key = SigningKey::from_bytes(&[0x42; 32]);
         let timestamp = 0xDEAD_BEEF;
-        let msg = WithSig::sign(
+        let msg = Signed::sign(
             &signing_key,
             timestamp,
             &mut fake_rng,
@@ -568,7 +568,7 @@ mod tests {
         ]];
         expect.assert_eq(&json);
 
-        let roundtrip_msg = serde_json::from_str::<WithSig<ChatPayload>>(&json).unwrap();
+        let roundtrip_msg = serde_json::from_str::<Signed<ChatPayload>>(&json).unwrap();
         assert_eq!(roundtrip_msg, msg);
         roundtrip_msg.verify().unwrap();
     }
