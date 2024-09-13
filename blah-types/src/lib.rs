@@ -14,7 +14,7 @@ use serde_with::{serde_as, DisplayFromStr};
 pub use bitflags;
 pub use ed25519_dalek;
 
-/// An opaque server-specific ID for room, chat item, and etc.
+/// An opaque server-specific ID for rooms, messages, and etc.
 /// It's currently serialized as a string for JavaScript's convenience.
 #[serde_as]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -34,15 +34,15 @@ impl Id {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct WithItemId<T> {
+pub struct WithMsgId<T> {
     pub cid: Id,
     #[serde(flatten)]
-    pub item: T,
+    pub msg: T,
 }
 
-impl<T> WithItemId<T> {
-    pub fn new(cid: Id, item: T) -> Self {
-        Self { cid, item }
+impl<T> WithMsgId<T> {
+    pub fn new(cid: Id, msg: T) -> Self {
+        Self { cid, msg }
     }
 }
 
@@ -308,7 +308,7 @@ impl RichText {
     }
 }
 
-pub type ChatItem = WithSig<ChatPayload>;
+pub type SignedChatMsg = WithSig<ChatPayload>;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RoomMetadata {
@@ -320,14 +320,14 @@ pub struct RoomMetadata {
     pub attrs: RoomAttrs,
 
     // Extra information is only available for some APIs.
-    /// The last item in the room.
+    /// The last message in the room.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub last_item: Option<WithItemId<ChatItem>>,
-    /// The current user's last seen item id.
+    pub last_msg: Option<WithMsgId<SignedChatMsg>>,
+    /// The current user's last seen message's `cid`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_seen_cid: Option<Id>,
-    /// The number of unseen messages, ie. the number of items from `last_seen_cid` to
-    /// `last_item.cid`.
+    /// The number of unseen messages, ie. the number of messages from `last_seen_cid` to
+    /// `last_msg.cid`.
     /// This may or may not be a precise number.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub unseen_cnt: Option<u64>,
@@ -547,11 +547,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn canonical_chat() {
+    fn canonical_msg() {
         let mut fake_rng = rand::rngs::mock::StepRng::new(0x42, 1);
         let signing_key = SigningKey::from_bytes(&[0x42; 32]);
         let timestamp = 0xDEAD_BEEF;
-        let item = WithSig::sign(
+        let msg = WithSig::sign(
             &signing_key,
             timestamp,
             &mut fake_rng,
@@ -562,15 +562,15 @@ mod tests {
         )
         .unwrap();
 
-        let json = serde_jcs::to_string(&item).unwrap();
+        let json = serde_jcs::to_string(&msg).unwrap();
         let expect = expect![[
             r#"{"sig":"18ee190722bebfd438c82f34890540d91578b4ba9f6c0c6011cc4fd751a321e32e9442d00dad1920799c54db011694c72a9ba993b408922e9997119209aa5e09","signee":{"nonce":66,"payload":{"rich_text":["hello"],"room":"42","typ":"chat"},"timestamp":3735928559,"user":"2152f8d19b791d24453242e15f2eab6cb7cffa7b6a5ed30097960e069881db12"}}"#
         ]];
         expect.assert_eq(&json);
 
-        let roundtrip_item = serde_json::from_str::<WithSig<ChatPayload>>(&json).unwrap();
-        assert_eq!(roundtrip_item, item);
-        roundtrip_item.verify().unwrap();
+        let roundtrip_msg = serde_json::from_str::<WithSig<ChatPayload>>(&json).unwrap();
+        assert_eq!(roundtrip_msg, msg);
+        roundtrip_msg.verify().unwrap();
     }
 
     #[test]

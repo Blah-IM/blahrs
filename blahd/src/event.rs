@@ -8,7 +8,7 @@ use std::task::{Context, Poll};
 
 use anyhow::{bail, Context as _, Result};
 use axum::extract::ws::{Message, WebSocket};
-use blah_types::{AuthPayload, ChatItem, WithSig};
+use blah_types::{AuthPayload, SignedChatMsg, WithSig};
 use futures_util::future::Either;
 use futures_util::stream::SplitSink;
 use futures_util::{stream_select, SinkExt as _, Stream, StreamExt};
@@ -28,8 +28,8 @@ pub enum Incoming {}
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Outgoing<'a> {
-    /// A chat message from a joined room.
-    Chat(&'a ChatItem),
+    /// A message from a joined room.
+    Msg(&'a SignedChatMsg),
     /// The receiver is too slow to receive and some events and are dropped.
     // FIXME: Should we indefinitely buffer them or just disconnect the client instead?
     Lagged,
@@ -71,11 +71,11 @@ impl WsSenderWrapper<'_, '_> {
     }
 }
 
-type UserEventSender = broadcast::Sender<Arc<ChatItem>>;
+type UserEventSender = broadcast::Sender<Arc<SignedChatMsg>>;
 
 #[derive(Debug)]
 struct UserEventReceiver {
-    rx: BroadcastStream<Arc<ChatItem>>,
+    rx: BroadcastStream<Arc<SignedChatMsg>>,
     st: Arc<AppState>,
     uid: u64,
 }
@@ -93,7 +93,7 @@ impl Drop for UserEventReceiver {
 }
 
 impl Stream for UserEventReceiver {
-    type Item = Result<Arc<ChatItem>, BroadcastStreamRecvError>;
+    type Item = Result<Arc<SignedChatMsg>, BroadcastStreamRecvError>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         self.rx.poll_next_unpin(cx)
@@ -155,7 +155,7 @@ pub async fn handle_ws(st: Arc<AppState>, ws: &mut WebSocket) -> Result<Infallib
             Either::Left(msg) => match serde_json::from_str::<Incoming>(&msg?)? {},
             Either::Right(ret) => {
                 let msg = match &ret {
-                    Ok(chat) => Outgoing::Chat(chat),
+                    Ok(chat) => Outgoing::Msg(chat),
                     Err(BroadcastStreamRecvError::Lagged(_)) => Outgoing::Lagged,
                 };
                 // TODO: Concurrent send.

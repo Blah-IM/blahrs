@@ -7,11 +7,11 @@ use std::sync::{Arc, LazyLock};
 
 use anyhow::Result;
 use blah_types::{
-    get_timestamp, AuthPayload, ChatItem, ChatPayload, CreateGroup, CreatePeerChat,
-    CreateRoomPayload, Id, MemberPermission, RichText, RoomAdminOp, RoomAdminPayload, RoomAttrs,
-    RoomMember, RoomMemberList, RoomMetadata, ServerPermission, UserKey, WithItemId, WithSig,
+    get_timestamp, AuthPayload, ChatPayload, CreateGroup, CreatePeerChat, CreateRoomPayload, Id,
+    MemberPermission, RichText, RoomAdminOp, RoomAdminPayload, RoomAttrs, RoomMember,
+    RoomMemberList, RoomMetadata, ServerPermission, SignedChatMsg, UserKey, WithMsgId, WithSig,
 };
-use blahd::{ApiError, AppState, Database, RoomItems, RoomList};
+use blahd::{ApiError, AppState, Database, RoomList, RoomMsgs};
 use ed25519_dalek::SigningKey;
 use futures_util::TryFutureExt;
 use rand::rngs::mock::StepRng;
@@ -176,8 +176,8 @@ impl Server {
         rid: Id,
         key: &SigningKey,
         text: &str,
-    ) -> impl Future<Output = Result<WithItemId<ChatItem>>> + use<'_> {
-        let item = sign(
+    ) -> impl Future<Output = Result<WithMsgId<SignedChatMsg>>> + use<'_> {
+        let msg = sign(
             key,
             &mut *self.rng.borrow_mut(),
             ChatPayload {
@@ -189,13 +189,13 @@ impl Server {
             let cid = self
                 .request::<_, Id>(
                     Method::POST,
-                    &format!("/room/{rid}/item"),
+                    &format!("/room/{rid}/msg"),
                     None,
-                    Some(item.clone()),
+                    Some(msg.clone()),
                 )
                 .await?
                 .unwrap();
-            Ok(WithItemId { cid, item })
+            Ok(WithMsgId { cid, msg })
         }
     }
 }
@@ -263,7 +263,7 @@ async fn room_create_get(server: Server, ref mut rng: impl RngCore, #[case] publ
         } else {
             RoomAttrs::empty()
         },
-        last_item: None,
+        last_msg: None,
         last_seen_cid: None,
         unseen_cnt: None,
         member_permission: None,
@@ -406,7 +406,7 @@ async fn room_join_leave(server: Server, ref mut rng: impl RngCore) {
 
 #[rstest]
 #[tokio::test]
-async fn room_item_post_read(server: Server, ref mut rng: impl RngCore) {
+async fn room_chat_post_read(server: Server, ref mut rng: impl RngCore) {
     let rid_pub = server
         .create_room(
             &ALICE_PRIV,
@@ -430,9 +430,9 @@ async fn room_item_post_read(server: Server, ref mut rng: impl RngCore) {
             },
         )
     };
-    let post = |rid: Id, chat: ChatItem| {
+    let post = |rid: Id, chat: SignedChatMsg| {
         server
-            .request::<_, Id>(Method::POST, &format!("/room/{rid}/item"), None, Some(chat))
+            .request::<_, Id>(Method::POST, &format!("/room/{rid}/msg"), None, Some(chat))
             .map_ok(|opt| opt.unwrap())
     };
 
@@ -471,94 +471,88 @@ async fn room_item_post_read(server: Server, ref mut rng: impl RngCore) {
         .await
         .expect_api_err(StatusCode::NOT_FOUND, "not_found");
 
-    //// Item listing ////
+    //// Msgs listing ////
 
-    let chat1 = WithItemId::new(cid1, chat1);
-    let chat2 = WithItemId::new(cid2, chat2);
+    let chat1 = WithMsgId::new(cid1, chat1);
+    let chat2 = WithMsgId::new(cid2, chat2);
 
     // List with default page size.
-    let items = server
-        .get::<RoomItems>(&format!("/room/{rid_pub}/item"), None)
+    let msgs = server
+        .get::<RoomMsgs>(&format!("/room/{rid_pub}/msg"), None)
         .await
         .unwrap();
     assert_eq!(
-        items,
-        RoomItems {
-            items: vec![chat2.clone(), chat1.clone()],
+        msgs,
+        RoomMsgs {
+            msgs: vec![chat2.clone(), chat1.clone()],
             skip_token: None,
         },
     );
 
     // List with small page size.
-    let items = server
-        .get::<RoomItems>(&format!("/room/{rid_pub}/item?top=1"), None)
+    let msgs = server
+        .get::<RoomMsgs>(&format!("/room/{rid_pub}/msg?top=1"), None)
         .await
         .unwrap();
     assert_eq!(
-        items,
-        RoomItems {
-            items: vec![chat2.clone()],
+        msgs,
+        RoomMsgs {
+            msgs: vec![chat2.clone()],
             skip_token: Some(cid2),
         },
     );
 
     // Second page.
-    let items = server
-        .get::<RoomItems>(
-            &format!("/room/{rid_pub}/item?skipToken={cid2}&top=1"),
-            None,
-        )
+    let msgs = server
+        .get::<RoomMsgs>(&format!("/room/{rid_pub}/msg?skipToken={cid2}&top=1"), None)
         .await
         .unwrap();
     assert_eq!(
-        items,
-        RoomItems {
-            items: vec![chat1.clone()],
+        msgs,
+        RoomMsgs {
+            msgs: vec![chat1.clone()],
             skip_token: Some(cid1),
         },
     );
 
     // No more.
-    let items = server
-        .get::<RoomItems>(
-            &format!("/room/{rid_pub}/item?skipToken={cid1}&top=1"),
-            None,
-        )
+    let msgs = server
+        .get::<RoomMsgs>(&format!("/room/{rid_pub}/msg?skipToken={cid1}&top=1"), None)
         .await
         .unwrap();
-    assert_eq!(items, RoomItems::default());
+    assert_eq!(msgs, RoomMsgs::default());
 
     //// Private room ////
 
     // Access without token.
     server
-        .get::<RoomItems>(&format!("/room/{rid_priv}/item"), None)
+        .get::<RoomMsgs>(&format!("/room/{rid_priv}/msg"), None)
         .await
         .expect_api_err(StatusCode::NOT_FOUND, "not_found");
 
     // Not a member.
     server
-        .get::<RoomItems>(
-            &format!("/room/{rid_priv}/item"),
+        .get::<RoomMsgs>(
+            &format!("/room/{rid_priv}/msg"),
             Some(&auth(&BOB_PRIV, rng)),
         )
         .await
         .expect_api_err(StatusCode::NOT_FOUND, "not_found");
 
     // Ok.
-    let items = server
-        .get::<RoomItems>(
-            &format!("/room/{rid_priv}/item"),
+    let msgs = server
+        .get::<RoomMsgs>(
+            &format!("/room/{rid_priv}/msg"),
             Some(&auth(&ALICE_PRIV, rng)),
         )
         .await
         .unwrap();
-    assert_eq!(items, RoomItems::default());
+    assert_eq!(msgs, RoomMsgs::default());
 }
 
 #[rstest]
 #[tokio::test]
-async fn last_seen_item(server: Server, ref mut rng: impl RngCore) {
+async fn last_seen(server: Server, ref mut rng: impl RngCore) {
     let title = "public room";
     let attrs = RoomAttrs::PUBLIC_READABLE | RoomAttrs::PUBLIC_JOINABLE;
     let member_perm = MemberPermission::ALL;
@@ -571,7 +565,7 @@ async fn last_seen_item(server: Server, ref mut rng: impl RngCore) {
     let alice_chat1 = server.post_chat(rid, &ALICE_PRIV, "alice1").await.unwrap();
     let alice_chat2 = server.post_chat(rid, &ALICE_PRIV, "alice2").await.unwrap();
 
-    // 2 new items.
+    // 2 new msgs.
     let rooms = server
         .get::<RoomList>("/room?filter=unseen", Some(&auth(&ALICE_PRIV, rng)))
         .await
@@ -583,7 +577,7 @@ async fn last_seen_item(server: Server, ref mut rng: impl RngCore) {
                 rid,
                 title: Some(title.into()),
                 attrs,
-                last_item: Some(alice_chat2.clone()),
+                last_msg: Some(alice_chat2.clone()),
                 last_seen_cid: None,
                 unseen_cnt: Some(2),
                 member_permission: Some(member_perm),
@@ -596,7 +590,7 @@ async fn last_seen_item(server: Server, ref mut rng: impl RngCore) {
     let seen = |key: &SigningKey, cid: Id| {
         server.request::<NoContent, NoContent>(
             Method::POST,
-            &format!("/room/{rid}/item/{cid}/seen"),
+            &format!("/room/{rid}/msg/{cid}/seen"),
             Some(&auth(key, &mut *server.rng.borrow_mut())),
             None,
         )
@@ -605,7 +599,7 @@ async fn last_seen_item(server: Server, ref mut rng: impl RngCore) {
     // Mark the first one seen.
     seen(&ALICE_PRIV, alice_chat1.cid).await.unwrap();
 
-    // 1 new item.
+    // 1 new msg.
     let rooms = server
         .get::<RoomList>("/room?filter=unseen", Some(&auth(&ALICE_PRIV, rng)))
         .await
@@ -617,7 +611,7 @@ async fn last_seen_item(server: Server, ref mut rng: impl RngCore) {
                 rid,
                 title: Some(title.into()),
                 attrs,
-                last_item: Some(alice_chat2.clone()),
+                last_msg: Some(alice_chat2.clone()),
                 last_seen_cid: Some(alice_chat1.cid),
                 unseen_cnt: Some(1),
                 member_permission: Some(member_perm),
@@ -627,7 +621,7 @@ async fn last_seen_item(server: Server, ref mut rng: impl RngCore) {
         }
     );
 
-    // Mark the second one seen. Now there is no new items.
+    // Mark the second one seen. Now there is no new messages.
     seen(&ALICE_PRIV, alice_chat2.cid).await.unwrap();
     let rooms = server
         .get::<RoomList>("/room?filter=unseen", Some(&auth(&ALICE_PRIV, rng)))
@@ -635,7 +629,7 @@ async fn last_seen_item(server: Server, ref mut rng: impl RngCore) {
         .unwrap();
     assert_eq!(rooms, RoomList::default());
 
-    // Marking a seen item seen is a no-op.
+    // Marking a seen message seen is a no-op.
     seen(&ALICE_PRIV, alice_chat2.cid).await.unwrap();
     let rooms = server
         .get::<RoomList>("/room?filter=unseen", Some(&auth(&ALICE_PRIV, rng)))
@@ -688,7 +682,7 @@ async fn peer_chat(server: Server, ref mut rng: impl RngCore) {
             rid,
             title: None,
             attrs: RoomAttrs::PEER_CHAT,
-            last_item: None,
+            last_msg: None,
             last_seen_cid: None,
             unseen_cnt: None,
             member_permission: None,

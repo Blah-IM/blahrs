@@ -186,15 +186,15 @@ async function enterRoom(rid) {
     });
 
     genAuthHeader()
-    .then(opts => fetch(`${serverUrl}/room/${rid}/item`, opts))
+    .then(opts => fetch(`${serverUrl}/room/${rid}/msg`, opts))
     .then(async (resp) => { return [resp.status, await resp.json()]; })
     .then(async ([status, json]) => {
         if (status !== 200) throw new Error(`status ${status}: ${json.error.message}`);
-        const { items } = json
-        items.reverse();
-        for (const chat of items) {
-            lastCid = chat.cid;
-            await showChatMsg(chat);
+        const { msgs } = json
+        msgs.reverse();
+        for (const msg of msgs) {
+            lastCid = msg.cid;
+            await showChatMsg(msg);
         }
         log('---history---');
     })
@@ -242,12 +242,12 @@ async function connectServer(newServerUrl) {
             if (msg.chat.signee.payload.room === curRoom) {
                 await showChatMsg(msg.chat);
             } else {
-                console.log('ignore background room item');
+                console.log('ignore background room msg');
             }
         } else if (msg.lagged !== undefined) {
             log('some events are dropped because of queue overflow')
         } else {
-            log(`unknown ws message: ${e.data}`);
+            log(`unknown ws msg: ${e.data}`);
         }
     };
 
@@ -269,11 +269,11 @@ async function loadRoomList(autoJoin) {
             const resp = await fetch(`${serverUrl}/room?filter=${filter}`, await genAuthHeader())
             const json = await resp.json()
             if (resp.status !== 200) throw new Error(`status ${resp.status}: ${json.error.message}`);
-            for (const { rid, title, attrs, last_item, last_seen_cid } of json.rooms) {
+            for (const { rid, title, attrs, last_msg, last_seen_cid } of json.rooms) {
                 const el = document.createElement('option');
                 el.value = rid;
                 el.innerText = `${title} (rid=${rid}, attrs=${attrs})`;
-                if (last_item !== undefined && last_item.cid !== last_seen_cid) {
+                if (last_msg !== undefined && last_msg.cid !== last_seen_cid) {
                     el.innerText += ' (unread)';
                 }
                 targetEl.appendChild(el);
@@ -381,7 +381,7 @@ async function postChat(text) {
         } else {
             richText = [text];
         }
-        await signAndPost(`${serverUrl}/room/${curRoom}/item`, {
+        await signAndPost(`${serverUrl}/room/${curRoom}/msg`, {
             // sorted fields.
             rich_text: richText,
             room: curRoom,
@@ -398,7 +398,7 @@ async function postChat(text) {
 
 async function markSeen() {
     try {
-        const resp = await fetch(`${serverUrl}/room/${curRoom}/item/${lastCid}/seen`, {
+        const resp = await fetch(`${serverUrl}/room/${curRoom}/msg/${lastCid}/seen`, {
             method: 'POST',
             headers: (await genAuthHeader()).headers,
         })

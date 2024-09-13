@@ -31,7 +31,7 @@ CREATE TABLE IF NOT EXISTS `room_member` (
     `rid`           INTEGER NOT NULL REFERENCES `room` ON DELETE CASCADE,
     `uid`           INTEGER NOT NULL REFERENCES `user` ON DELETE RESTRICT,
     `permission`    INTEGER NOT NULL,
-    -- Optionally references `room_item`(`cid`).
+    -- Optionally references `msg`(`cid`).
     `last_seen_cid` INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (`rid`, `uid`)
 ) STRICT;
@@ -39,7 +39,7 @@ CREATE TABLE IF NOT EXISTS `room_member` (
 CREATE INDEX IF NOT EXISTS `ix_member_room` ON `room_member`
     (`uid` ASC, `rid` ASC, `permission`, `last_seen_cid`);
 
-CREATE TABLE IF NOT EXISTS `room_item` (
+CREATE TABLE IF NOT EXISTS `msg` (
     `cid`       INTEGER NOT NULL PRIMARY KEY,
     `rid`       INTEGER NOT NULL REFERENCES `room` ON DELETE CASCADE,
     `uid`       INTEGER NOT NULL REFERENCES `user` ON DELETE RESTRICT,
@@ -49,4 +49,4 @@ CREATE TABLE IF NOT EXISTS `room_item` (
     `rich_text` TEXT NOT NULL
 ) STRICT;
 
-CREATE INDEX IF NOT EXISTS `room_latest_item` ON `room_item` (`rid` ASC, `cid` DESC);
+CREATE INDEX IF NOT EXISTS `room_latest_msg` ON `msg` (`rid` ASC, `cid` DESC);

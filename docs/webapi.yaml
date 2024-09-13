@@ -72,8 +72,8 @@ paths:
           schema:
             type: string
           description:
-            The maximum number of items returned in each page. This is only an
-            advice and server can clamp it to a smaller value.
+            The maximum count of rooms returned in a single response. This is
+            only an advice and server can clamp it to a smaller value.
 
         - name: skipToken
           in: query
@@ -107,7 +107,7 @@ paths:
 
   /room/create:
     post:
-      summary: Create room
+      summary: Create a room
 
       description:
         When `typ="create_room"`, create a multi-user room.
@@ -229,13 +229,13 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiError'
 
-  /room/{rid}/item:
+  /room/{rid}/msg:
     get:
-      summary: List items in room
+      summary: List messages in a room
       description: |
-        Return items in reversed time order, up to `skipToken` items in a
-        single response, from room {rid}.
-        The last (oldest) chat `cid` will be returned as `skipToken` in
+        Return a list of messages in reversed server time order, up to length `top`
+        in a single response, from room {rid}.
+        The last (oldest) message's `cid` will be returned as `skipToken` in
         response, which can be used as query parameter for the next GET, to
         repeatedly fetch more history.
 
@@ -251,8 +251,9 @@ paths:
           schema:
             type: integer
           description: |
-            The maximum number of items to return. This is an advice and may be
-            further clamped by the server. It must not be zero.
+            The number of items returned in a single response. This is
+            an advice and may be further clamped by the server. It must not be
+            zero.
 
         - name: skipToken
           in: query
@@ -267,7 +268,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/RoomItems'
+                $ref: '#/components/schemas/RoomMsgs'
 
         404:
           description: |
@@ -278,7 +279,7 @@ paths:
                 $ref: '#/components/schemas/ApiError'
 
     post:
-      summary: Post item in room
+      summary: Post a `Msg` into a room
       requestBody:
         content:
           application/json:
@@ -291,7 +292,7 @@ paths:
             application/json:
               schema:
                 type: string
-                description: Newly created item `cid`.
+                description: Newly created message id `cid`.
 
         403:
           description: The user does not have permission to post in this room.
@@ -307,15 +308,16 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiError'
 
-  /room/{rid}/item/{cid}/seen:
+  /room/{rid}/msg/{cid}/seen:
     post:
-      summary: Mark item seen
+      summary: Mark a message seen
       description: |
-        Mark item {cid} in room {rid} seen by the current user.
+        Mark message {cid} and everything before it in room {rid} seen by the
+        current user.
 
-        Server may enforce that last seen item does not go backward. Marking
-        an older item seen or sending the same request multiple times can be a
-        no-op.
+        Server may enforce that last seen message does not go backward. Marking
+        an older message seen or sending the same request multiple times can be
+        a no-op.
 
       parameters:
         - name: Authorization
@@ -398,8 +400,8 @@ components:
           description: Room attributes bitset, see `RoomAttrs`.
           type: integer
           format: int64
-        last_item:
-          $ref: '#/components/schemas/WithItemId-WithSig-Chat'
+        last_msg:
+          $ref: '#/components/schemas/WithMsgId-WithSig-Chat'
         last_seen_cid:
           description: The `cid` of the last chat being marked as seen.
           type: string
@@ -429,16 +431,16 @@ components:
           type: integer
           format: int64
 
-    RoomItems:
+    RoomMsgs:
       type: object
       required:
-        - items
+        - msgs
       properties:
-        items:
-          description: Room items in reversed server-received time order.
+        msgs:
+          description: Room messages in reversed server-received time order.
           type: array
           items:
-            $ref: '#/components/schemas/WithItemId-WithSig-Chat'
+            $ref: '#/components/schemas/WithMsgId-WithSig-Chat'
         skip_token:
           description: The token for fetching the next page.
           type: string
@@ -581,14 +583,14 @@ components:
           timestamp: 1724966284
           user: 83ce46ced47ec0391c64846cbb6c507250ead4985b6a044d68751edc46015dd7
 
-    WithItemId-WithSig-Chat:
+    WithMsgId-WithSig-Chat:
       allOf:
         - $ref: '#/components/schemas/WithSig-Chat'
         - type: object
           properties:
             cid:
               type: string
-              description: An opaque server-specific item identifier.
+              description: An opaque server-specific identifier.
 
     WithSig-CreateRoom:
       type: object
