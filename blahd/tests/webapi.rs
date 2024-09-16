@@ -8,8 +8,8 @@ use std::sync::{Arc, LazyLock};
 use anyhow::Result;
 use blah_types::{
     get_timestamp, AuthPayload, ChatPayload, CreateGroup, CreatePeerChat, CreateRoomPayload, Id,
-    MemberPermission, RichText, RoomAdminOp, RoomAdminPayload, RoomAttrs, RoomMember,
-    RoomMemberList, RoomMetadata, ServerPermission, Signed, SignedChatMsg, UserKey, WithMsgId,
+    MemberPermission, RichText, RoomAdminOp, RoomAdminPayload, RoomAttrs, RoomMetadata,
+    ServerPermission, Signed, SignedChatMsg, UserKey, WithMsgId,
 };
 use blahd::{ApiError, AppState, Database, RoomList, RoomMsgs};
 use ed25519_dalek::SigningKey;
@@ -120,10 +120,6 @@ impl Server {
             &mut *self.rng.borrow_mut(),
             CreateRoomPayload::Group(CreateGroup {
                 attrs,
-                members: RoomMemberList(vec![RoomMember {
-                    permission: MemberPermission::ALL,
-                    user: UserKey(key.verifying_key().to_bytes()),
-                }]),
                 title: title.to_string(),
             }),
         );

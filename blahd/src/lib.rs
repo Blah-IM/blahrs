@@ -363,44 +363,34 @@ async fn room_create_group(
         ));
     }
 
-    let members = &op.members.0;
-    if !members
-        .iter()
-        .any(|m| m.user == user && m.permission == MemberPermission::ALL)
-    {
-        return Err(error_response!(
-            StatusCode::BAD_REQUEST,
-            "deserialization",
-            "invalid initial members",
-        ));
-    }
-
-    let mut conn = st.db.get();
-    let Some(true) = conn
+    let conn = st.db.get();
+    let (uid, _perm) = conn
         .query_row(
             r"
-            SELECT `permission`
+            SELECT `uid`, `permission`
             FROM `user`
             WHERE `userkey` = ?
             ",
             params![user],
             |row| {
-                let perm = row.get::<_, ServerPermission>("permission")?;
-                Ok(perm.contains(ServerPermission::CREATE_ROOM))
+                Ok((
+                    row.get::<_, i64>("uid")?,
+                    row.get::<_, ServerPermission>("permission")?,
+                ))
             },
         )
         .optional()?
-    else {
-        return Err(error_response!(
-            StatusCode::FORBIDDEN,
-            "permission_denied",
-            "user does not have permission to create room",
-        ));
-    };
+        .filter(|(_, perm)| perm.contains(ServerPermission::CREATE_ROOM))
+        .ok_or_else(|| {
+            error_response!(
+                StatusCode::FORBIDDEN,
+                "permission_denied",
+                "the user does not exist or does not have permission to create room",
+            )
+        })?;
 
-    let txn = conn.transaction()?;
     let rid = Id::gen();
-    txn.execute(
+    conn.execute(
         r"
         INSERT INTO `room` (`rid`, `title`, `attrs`)
         VALUES (:rid, :title, :attrs)
@@ -411,32 +401,17 @@ async fn room_create_group(
             ":attrs": op.attrs,
         },
     )?;
-    let mut insert_user = txn.prepare(
-        r"
-        INSERT INTO `user` (`userkey`)
-        VALUES (?)
-        ON CONFLICT (`userkey`) DO NOTHING
-        ",
-    )?;
-    let mut insert_member = txn.prepare(
+    conn.execute(
         r"
         INSERT INTO `room_member` (`rid`, `uid`, `permission`)
-        SELECT :rid, `uid`, :permission
-        FROM `user`
-        WHERE `userkey` = :userkey
+        VALUES (:rid, :uid, :perm)
         ",
-    )?;
-    for member in members {
-        insert_user.execute(params![member.user])?;
-        insert_member.execute(named_params! {
+        named_params! {
             ":rid": rid,
-            ":userkey": member.user,
-            ":permission": member.permission,
-        })?;
-    }
-    drop(insert_member);
-    drop(insert_user);
-    txn.commit()?;
+            ":uid": uid,
+            ":perm": MemberPermission::ALL,
+        },
+    )?;
 
     Ok(Json(rid))
 }

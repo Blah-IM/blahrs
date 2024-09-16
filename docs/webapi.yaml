@@ -612,16 +612,6 @@ components:
                       const: 'create_room'
                     title:
                       type: string
-                    members:
-                      type: array
-                      items:
-                        type: object
-                        properties:
-                          user:
-                            type: string
-                          permission:
-                            type: integer
-                            format: int64
                 - type: object
                   properties:
                     typ:

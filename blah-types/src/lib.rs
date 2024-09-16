@@ -353,9 +353,6 @@ pub enum CreateRoomPayload {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CreateGroup {
     pub attrs: RoomAttrs,
-    /// The initial member list. Besides invariants of `RoomMemberList`, this also must include the
-    /// room creator themselves, with the highest permission (-1).
-    pub members: RoomMemberList,
     pub title: String,
 }
 
