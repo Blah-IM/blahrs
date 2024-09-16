@@ -1,3 +1,4 @@
+use std::backtrace::Backtrace;
 use std::fmt;
 use std::sync::Arc;
 
@@ -84,7 +85,7 @@ define_from_deser_rejection! {
 
 impl From<rusqlite::Error> for ApiError {
     fn from(err: rusqlite::Error) -> Self {
-        tracing::error!(%err, "database error");
+        tracing::error!(%err, backtrace = %Backtrace::force_capture(), "database error");
         error_response!(
             StatusCode::INTERNAL_SERVER_ERROR,
             "server_error",
