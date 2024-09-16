@@ -54,3 +54,29 @@ send_timeout_sec = 15
 # If events overflow the pending buffer, older events will be dropped and
 # client will be notified.
 event_queue_len = 1024
+
+[server.register]
+# Allow public registration.
+enable_public = false
+
+# The registration challenge difficulty.
+# It demands at least `difficulty` number of leading zeros in SHA256 for
+# Proof of Work (PoW).
+difficulty = 16
+
+# The challenge nonce rotation period in seconds.
+nonce_rotate_secs = 60
+
+# The timeout in seconds for fetching user `id_url`.
+request_timeout_secs = 5
+
+# The maximum response length in bytes of user's identity description.
+max_identity_description_bytes = 65536
+
+# [UNSAFE] Also accept HTTP `id_url`. By default only HTTPS is allowed.
+# This should only be used for testing.
+unsafe_allow_id_url_http = false
+
+# [UNSAFE] Also accept `id_url` with custom port.
+# This should only be used for testing.
+unsafe_allow_id_url_custom_port = false

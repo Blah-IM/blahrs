@@ -9,10 +9,46 @@ use ed25519_dalek::{
 use rand_core::RngCore;
 use serde::{de, Deserialize, Deserializer, Serialize, Serializer};
 use serde_with::{serde_as, DisplayFromStr};
+use url::Url;
 
 // Re-export of public dependencies.
 pub use bitflags;
 pub use ed25519_dalek;
+
+pub const X_BLAH_NONCE: &str = "x-blah-nonce";
+pub const X_BLAH_DIFFICULTY: &str = "x-blah-difficulty";
+
+/// User identity description structure.
+// TODO: Revise and shrink duplicates (pubkey fields).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UserIdentityDesc {
+    /// User primary identity key, only for signing action keys.
+    pub id_key: UserKey,
+    /// User action subkeys, signed by the identity key.
+    pub act_keys: Vec<Signed<UserActKeyDesc>>,
+    /// User profile, signed by any valid action key.
+    pub profile: Signed<UserProfile>,
+}
+
+impl UserIdentityDesc {
+    pub const WELL_KNOWN_PATH: &str = "/.well-known/blah/identity.json";
+}
+
+// TODO: JWS or alike?
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "typ", rename = "user_act_key")]
+pub struct UserActKeyDesc {
+    pub act_key: UserKey,
+    pub expire_time: u64,
+    pub comment: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "typ", rename = "user_profile")]
+pub struct UserProfile {
+    pub preferred_chat_server_urls: Vec<Url>,
+    pub id_urls: Vec<Url>,
+}
 
 /// An opaque server-specific ID for rooms, messages, and etc.
 /// It's currently serialized as a string for JavaScript's convenience.
@@ -83,6 +119,11 @@ pub fn get_timestamp() -> u64 {
 }
 
 impl<T: Serialize> Signed<T> {
+    /// Get the canonically serialized signee bytes.
+    pub fn canonical_signee(&self) -> Vec<u8> {
+        serde_jcs::to_vec(&self.signee).expect("serialization cannot fail")
+    }
+
     /// Sign the payload with the given `key`.
     pub fn sign(
         key: &SigningKey,
@@ -105,11 +146,20 @@ impl<T: Serialize> Signed<T> {
     ///
     /// Note that this does not check validity of timestamp and other data.
     pub fn verify(&self) -> Result<(), SignatureError> {
-        let canonical_signee = serde_jcs::to_vec(&self.signee).expect("serialization cannot fail");
-        let sig = Signature::from_bytes(&self.sig);
-        VerifyingKey::from_bytes(&self.signee.user.0)?.verify_strict(&canonical_signee, &sig)?;
+        VerifyingKey::from_bytes(&self.signee.user.0)?
+            .verify_strict(&self.canonical_signee(), &Signature::from_bytes(&self.sig))?;
         Ok(())
     }
+}
+
+/// Register a user on a chat server.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "typ", rename = "user_register")]
+pub struct UserRegisterPayload {
+    pub server_url: Url,
+    pub id_url: Url,
+    pub id_key: UserKey,
+    pub challenge_nonce: u32,
 }
 
 // FIXME: `deny_unknown_fields` breaks this.

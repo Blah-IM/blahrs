@@ -2,9 +2,19 @@
 -- implemented and layout can change at any time.
 
 CREATE TABLE IF NOT EXISTS `user` (
-    `uid`           INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
-    `userkey`       BLOB NOT NULL UNIQUE,
-    `permission`    INTEGER NOT NULL DEFAULT 0
+    `uid`               INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+    `userkey`           BLOB NOT NULL UNIQUE,
+    `permission`        INTEGER NOT NULL DEFAULT 0,
+    `last_fetch_time`   INTEGER NOT NULL,
+    `id_desc`           TEXT NOT NULL
+) STRICT;
+
+CREATE TABLE IF NOT EXISTS `user_act_key` (
+    `uid`           INTEGER NOT NULL REFERENCES `user` (`uid`),
+    `act_key`       BLOB NOT NULL,
+    `expire_time`   INTEGER NOT NULL,
+
+    PRIMARY KEY (`uid`, `act_key`)
 ) STRICT;
 
 -- The highest bit of `rid` will be set for peer chat room.

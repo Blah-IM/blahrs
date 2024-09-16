@@ -276,6 +276,7 @@ dependencies = [
  "serde_jcs",
  "serde_json",
  "serde_with",
+ "url",
 ]
 
 [[package]]
@@ -305,6 +306,7 @@ dependencies = [
  "ed25519-dalek",
  "futures-util",
  "hex",
+ "http-body-util",
  "humantime",
  "nix",
  "parking_lot",
@@ -317,8 +319,10 @@ dependencies = [
  "serde",
  "serde-constant",
  "serde-inline-default",
+ "serde_jcs",
  "serde_json",
  "serde_urlencoded",
+ "sha2",
  "tokio",
  "tokio-stream",
  "toml",

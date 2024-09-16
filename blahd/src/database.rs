@@ -13,7 +13,7 @@ static INIT_SQL: &str = include_str!("../schema.sql");
 
 // Simple and stupid version check for now.
 // `echo -n 'blahd-database-0' | sha256sum | head -c5` || version
-const APPLICATION_ID: i32 = 0xd9e_8404;
+const APPLICATION_ID: i32 = 0xd9e_8405;
 
 #[serde_inline_default]
 #[derive(Debug, Clone, Deserialize)]

@@ -46,6 +46,91 @@ paths:
               schema:
                 $ref: '#/components/schemas/WSServerToClient'
 
+  /user/me:
+    get:
+      summary: Check registration status of the current user
+      parameters:
+        - name: Authorization
+          in: header
+          description: Optional user authentication token.
+          schema:
+            $ref: '#/components/schemas/Signed-Auth'
+
+      responses:
+        204:
+          description: The user is already registered on the server.
+
+        404:
+          description: |
+            The user is not registered, or no token is not provided.
+          headers:
+            x-blah-nonce:
+              description: The challenge nonce for registration.
+              schema:
+                type: integer
+                format: uint32
+            x-blah-difficulty:
+              description: The challenge difficulty for registration.
+              schema:
+                type: integer
+                format: uint32
+
+    post:
+      summary: Register or update user identity
+      description: |
+        Register or update a user identity description.
+
+        To prevent misuse and DOS of this endpoint, the request must pass the
+        server-specific Proof of Work (PoW) challenge as below:
+
+        1.  The request payload must include `challenge_nonce` with the value
+            of `x-blah-nonce` header from a recent enough GET response of
+            `/user/me`. Server will rotate it and a nonce will expire after a
+            server-specific time period.
+
+        2.  The SHA256 of the canonical serialization (JCS) of `signee` must
+            have at least `x-blah-difficulty` (from a recent response) number
+            of leading zero bits.
+
+        The `id_url` should be a HTTPS domain name without path. A fixed
+        well-known path `/.well-known/blah.identity.json` will be fetched.
+        It should return status 200, with a JSON response of type
+        `UserIdentityDescription`.
+
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Signed-UserRegister'
+
+      responses:
+        204:
+          description: User successfully registered.
+
+        400:
+          description: Invalid request format, or invalid challenge.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+
+        401:
+          description: |
+            Unable to verify user identity. May caused by connection failure
+            when fetching id_url, malformed identity description, and etc.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+
+        409:
+          description: |
+            User state changed during the operation. Could retry later.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+
   /room:
     get:
       summary: List rooms
@@ -635,3 +720,95 @@ components:
                 permission: -1
           timestamp: 1724966284
           user: 83ce46ced47ec0391c64846cbb6c507250ead4985b6a044d68751edc46015dd7
+
+    Signed-UserRegister:
+      type: object
+      properties:
+        sig:
+          type: string
+        signee:
+          type: object
+          properties:
+            nonce:
+              type: integer
+              format: uint32
+            payload:
+              type: object
+              properties:
+                typ:
+                  type: string
+                  const: 'user_register'
+                server_url:
+                  type: string
+                  description: The server URL to register on. Must matches chat server's base_url.
+                id_url:
+                  type: string
+                  description: The identity server URL. Must be in form `https://<domain>`.
+                id_key:
+                  type: string
+                  description: Hex encoded user primary key `id_key`.
+                challenge_nonce:
+                  type: integer
+                  format: uint32
+                  description: The challenge nonce retrieved from a recent GET response of `/user/me`.
+
+    UserIdentityDescription:
+      type: object
+      properties:
+        id_key:
+          type: string
+
+        act_keys:
+          type: array
+          items:
+            type: object
+            properties:
+              sig:
+                type: string
+              signee:
+                type: object
+                properties:
+                  nonce:
+                    type: integer
+                    format: uint32
+                  payload:
+                    type: object
+                    properties:
+                      typ:
+                        type: string
+                        const: 'user_act_key'
+                      act_key:
+                        type: string
+                      expire_time:
+                        type: integer
+                        format: uint64
+                      comment:
+                        type: string
+
+        profile:
+          type: object
+          properties:
+            sig:
+              type: string
+            signee:
+              type: object
+              properties:
+                nonce:
+                  type: integer
+                  format: uint32
+                payload:
+                  type: object
+                  properties:
+                    typ:
+                      type: string
+                      const: 'user_profile'
+                    preferred_chat_server_urls:
+                      type: array
+                      items:
+                        type: string
+                        format: url
+                    id_urls:
+                      type: array
+                      items:
+                        type: string
+                        format: url

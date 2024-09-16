@@ -5,7 +5,7 @@ use std::time::{Duration, SystemTime};
 use anyhow::Result;
 use axum::extract::ws;
 use axum::extract::{Path, Query, State, WebSocketUpgrade};
-use axum::http::{header, StatusCode};
+use axum::http::{header, HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
@@ -13,7 +13,7 @@ use axum_extra::extract::WithRejection as R;
 use blah_types::{
     ChatPayload, CreateGroup, CreatePeerChat, CreateRoomPayload, Id, MemberPermission, RoomAdminOp,
     RoomAdminPayload, RoomAttrs, RoomMetadata, ServerPermission, Signed, SignedChatMsg, Signee,
-    UserKey, WithMsgId,
+    UserKey, UserRegisterPayload, WithMsgId,
 };
 use ed25519_dalek::SIGNATURE_LENGTH;
 use id::IdExt;
@@ -27,10 +27,12 @@ use utils::ExpiringSet;
 
 #[macro_use]
 mod middleware;
+
 pub mod config;
 mod database;
 mod event;
 mod id;
+mod register;
 mod utils;
 
 pub use database::Database;
@@ -53,6 +55,8 @@ pub struct ServerConfig {
 
     #[serde(default)]
     pub ws: event::Config,
+    #[serde(default)]
+    pub register: register::Config,
 }
 
 fn de_base_url<'de, D: Deserializer<'de>>(de: D) -> Result<Url, D::Error> {
@@ -71,6 +75,7 @@ pub struct AppState {
     db: Database,
     used_nonces: Mutex<ExpiringSet<u32>>,
     event: event::State,
+    register: register::State,
 
     config: ServerConfig,
 }
@@ -83,6 +88,7 @@ impl AppState {
                 config.timestamp_tolerance_secs,
             ))),
             event: event::State::default(),
+            register: register::State::new(config.register.clone()),
 
             config,
         }
@@ -124,6 +130,7 @@ type ArcState = State<Arc<AppState>>;
 pub fn router(st: Arc<AppState>) -> Router {
     Router::new()
         .route("/ws", get(handle_ws))
+        .route("/user/me", get(user_get).post(user_register))
         .route("/room", get(room_list))
         .route("/room/create", post(room_create))
         .route("/room/:rid", get(room_get_metadata))
@@ -166,6 +173,43 @@ async fn handle_ws(State(st): ArcState, ws: WebSocketUpgrade) -> Response {
             }
         }
     })
+}
+
+async fn user_get(
+    State(st): ArcState,
+    auth: MaybeAuth,
+) -> Result<StatusCode, (HeaderMap, ApiError)> {
+    let ret = (|| {
+        match auth.into_optional()? {
+            None => None,
+            Some(user) => st
+                .db
+                .get()
+                .query_row(
+                    "
+                    SELECT 1
+                    FROM `user`
+                    WHERE `userkey` = ?
+                    ",
+                    params![user],
+                    |_| Ok(()),
+                )
+                .optional()?,
+        }
+        .ok_or_else(|| error_response!(StatusCode::NOT_FOUND, "not_found", "user does not exist"))
+    })();
+
+    match ret {
+        Ok(()) => Ok(StatusCode::NO_CONTENT),
+        Err(err) => Err((st.register.challenge_headers(), err)),
+    }
+}
+
+async fn user_register(
+    State(st): ArcState,
+    SignedJson(msg): SignedJson<UserRegisterPayload>,
+) -> impl IntoResponse {
+    register::user_register(&st, msg).await
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
