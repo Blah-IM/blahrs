@@ -138,7 +138,9 @@ paths:
                 $ref: '#/components/schemas/ApiError'
 
         404:
-          description: The peer user does not exist or disallows peer chat.
+          description: |
+            The current user does not exists, the peer user does not exist or
+            they disallows peer chat.
           content:
             application/json:
               schema:

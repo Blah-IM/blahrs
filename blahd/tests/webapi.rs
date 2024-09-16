@@ -202,11 +202,22 @@ fn server() -> Server {
 
     let mut conn = Connection::open_in_memory().unwrap();
     Database::maybe_init(&mut conn).unwrap();
-    conn.execute(
-        "INSERT INTO `user` (`userkey`, `permission`) VALUES (?, ?)",
-        params![*ALICE, ServerPermission::ALL],
-    )
-    .unwrap();
+    {
+        let mut add_user = conn
+            .prepare(
+                r"
+                INSERT INTO `user` (`userkey`, `permission`)
+                VALUES (?, ?)
+                ",
+            )
+            .unwrap();
+        for (user, perm) in [
+            (&*ALICE, ServerPermission::ALL),
+            (&BOB, ServerPermission::empty()),
+        ] {
+            add_user.execute(params![user, perm]).unwrap();
+        }
+    }
     let db = Database::from_raw(conn).unwrap();
 
     // Use std's to avoid async, since we need no name resolution.

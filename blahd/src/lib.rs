@@ -434,6 +434,23 @@ async fn room_create_peer_chat(
 
     let mut conn = st.db.get();
     let txn = conn.transaction()?;
+    let src_uid = txn
+        .query_row(
+            r"
+            SELECT `uid` FROM `user`
+            WHERE `userkey` = ?
+            ",
+            params![src_user],
+            |row| row.get::<_, i64>(0),
+        )
+        .optional()?
+        .ok_or_else(|| {
+            error_response!(
+                StatusCode::NOT_FOUND,
+                "not_found",
+                "the user does not exist",
+            )
+        })?;
     let tgt_uid = txn
         .query_row(
             r"
@@ -456,29 +473,6 @@ async fn room_create_peer_chat(
                 "peer user does not exist or disallows peer chat",
             )
         })?;
-    let src_uid = txn
-        .query_row(
-            r"
-            SELECT `uid` FROM `user`
-            WHERE `userkey` = ?
-            ",
-            params![src_user],
-            |row| row.get::<_, i64>(0),
-        )
-        .optional()?;
-    let src_uid = match src_uid {
-        Some(uid) => uid,
-        None => {
-            txn.execute(
-                r"
-                INSERT INTO `user` (`userkey`)
-                VALUES (?)
-                ",
-                params![src_user],
-            )?;
-            txn.last_insert_rowid()
-        }
-    };
 
     let (peer1, peer2) = if src_uid <= tgt_uid {
         (src_uid, tgt_uid)
@@ -955,45 +949,52 @@ async fn room_join(
 ) -> Result<(), ApiError> {
     let mut conn = st.db.get();
     let txn = conn.transaction()?;
-    let is_public_joinable = txn
+    let uid = txn
         .query_row(
             r"
-            SELECT `attrs`
-            FROM `room`
-            WHERE `rid` = ?
+            SELECT `uid`
+            FROM `user`
+            WHERE `userkey` = ?
             ",
-            params![rid],
-            |row| row.get::<_, RoomAttrs>(0),
+            params![user],
+            |row| row.get::<_, i32>(0),
         )
         .optional()?
-        .is_some_and(|attrs| attrs.contains(RoomAttrs::PUBLIC_JOINABLE));
-    if !is_public_joinable {
-        return Err(error_response!(
+        .ok_or_else(|| {
+            error_response!(
+                StatusCode::NOT_FOUND,
+                "not_found",
+                "the user does not exist",
+            )
+        })?;
+    txn.query_row(
+        r"
+        SELECT `attrs`
+        FROM `room`
+        WHERE `rid` = ?
+        ",
+        params![rid],
+        |row| row.get::<_, RoomAttrs>(0),
+    )
+    .optional()?
+    .filter(|attrs| attrs.contains(RoomAttrs::PUBLIC_JOINABLE))
+    .ok_or_else(|| {
+        error_response!(
             StatusCode::NOT_FOUND,
             "not_found",
             "the room does not exist or the user is not allowed to join the room",
-        ));
-    }
+        )
+    })?;
 
-    txn.execute(
-        r"
-        INSERT INTO `user` (`userkey`)
-        VALUES (?)
-        ON CONFLICT (`userkey`) DO NOTHING
-        ",
-        params![user],
-    )?;
     let updated = txn.execute(
         r"
         INSERT INTO `room_member` (`rid`, `uid`, `permission`)
-        SELECT :rid, `uid`, :perm
-        FROM `user`
-        WHERE `userkey` = :userkey
+        SELECT :rid, :uid, :perm
         ON CONFLICT (`rid`, `uid`) DO NOTHING
         ",
         named_params! {
            ":rid": rid,
-           ":userkey": user,
+           ":uid": uid,
            ":perm": permission,
         },
     )?;
