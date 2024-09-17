@@ -2,8 +2,8 @@
 -- implemented and layout can change at any time.
 
 CREATE TABLE IF NOT EXISTS `user` (
-    `uid`               INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
-    `userkey`           BLOB NOT NULL UNIQUE,
+    `uid`               INTEGER NOT NULL PRIMARY KEY,
+    `id_key`            BLOB NOT NULL UNIQUE,
     `permission`        INTEGER NOT NULL DEFAULT 0,
     `last_fetch_time`   INTEGER NOT NULL,
     `id_desc`           TEXT NOT NULL
@@ -15,7 +15,13 @@ CREATE TABLE IF NOT EXISTS `user_act_key` (
     `expire_time`   INTEGER NOT NULL,
 
     PRIMARY KEY (`uid`, `act_key`)
-) STRICT;
+) STRICT, WITHOUT ROWID;
+
+CREATE VIEW IF NOT EXISTS `valid_user_act_key` AS
+    SELECT `act_key`, `user`.*
+    FROM `user_act_key`
+    JOIN `user` USING (`uid`)
+    WHERE unixepoch() < `expire_time`;
 
 -- The highest bit of `rid` will be set for peer chat room.
 -- So simply comparing it against 0 can filter them out.
@@ -53,6 +59,8 @@ CREATE TABLE IF NOT EXISTS `msg` (
     `cid`       INTEGER NOT NULL PRIMARY KEY,
     `rid`       INTEGER NOT NULL REFERENCES `room` ON DELETE CASCADE,
     `uid`       INTEGER NOT NULL REFERENCES `user` ON DELETE RESTRICT,
+    -- Optionally references `user_act_key`(`act_key`)
+    `act_key`   BLOB NOT NULL,
     `timestamp` INTEGER NOT NULL,
     `nonce`     INTEGER NOT NULL,
     `sig`       BLOB NOT NULL,

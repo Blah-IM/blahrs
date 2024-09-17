@@ -23,7 +23,7 @@ pub const X_BLAH_DIFFICULTY: &str = "x-blah-difficulty";
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct UserIdentityDesc {
     /// User primary identity key, only for signing action keys.
-    pub id_key: UserKey,
+    pub id_key: PubKey,
     /// User action subkeys, signed by the identity key.
     pub act_keys: Vec<Signed<UserActKeyDesc>>,
     /// User profile, signed by any valid action key.
@@ -38,7 +38,7 @@ impl UserIdentityDesc {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "typ", rename = "user_act_key")]
 pub struct UserActKeyDesc {
-    pub act_key: UserKey,
+    pub act_key: PubKey,
     pub expire_time: u64,
     pub comment: String,
 }
@@ -83,10 +83,16 @@ impl<T> WithMsgId<T> {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(transparent)]
-pub struct UserKey(#[serde(with = "hex::serde")] pub [u8; PUBLIC_KEY_LENGTH]);
+pub struct UserKey {
+    pub id_key: PubKey,
+    pub act_key: PubKey,
+}
 
-impl fmt::Display for UserKey {
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct PubKey(#[serde(with = "hex::serde")] pub [u8; PUBLIC_KEY_LENGTH]);
+
+impl fmt::Display for PubKey {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut buf = [0u8; PUBLIC_KEY_LENGTH * 2];
         hex::encode_to_slice(self.0, &mut buf).expect("buf size is correct");
@@ -108,6 +114,7 @@ pub struct Signee<T> {
     pub nonce: u32,
     pub payload: T,
     pub timestamp: u64,
+    #[serde(flatten)]
     pub user: UserKey,
 }
 
@@ -126,7 +133,8 @@ impl<T: Serialize> Signed<T> {
 
     /// Sign the payload with the given `key`.
     pub fn sign(
-        key: &SigningKey,
+        id_key: &PubKey,
+        act_key: &SigningKey,
         timestamp: u64,
         rng: &mut (impl RngCore + ?Sized),
         payload: T,
@@ -135,10 +143,13 @@ impl<T: Serialize> Signed<T> {
             nonce: rng.next_u32(),
             payload,
             timestamp,
-            user: UserKey(key.verifying_key().to_bytes()),
+            user: UserKey {
+                act_key: PubKey(act_key.verifying_key().to_bytes()),
+                id_key: id_key.clone(),
+            },
         };
         let canonical_signee = serde_jcs::to_vec(&signee).expect("serialization cannot fail");
-        let sig = key.try_sign(&canonical_signee)?.to_bytes();
+        let sig = act_key.try_sign(&canonical_signee)?.to_bytes();
         Ok(Self { sig, signee })
     }
 
@@ -146,7 +157,7 @@ impl<T: Serialize> Signed<T> {
     ///
     /// Note that this does not check validity of timestamp and other data.
     pub fn verify(&self) -> Result<(), SignatureError> {
-        VerifyingKey::from_bytes(&self.signee.user.0)?
+        VerifyingKey::from_bytes(&self.signee.user.act_key.0)?
             .verify_strict(&self.canonical_signee(), &Signature::from_bytes(&self.sig))?;
         Ok(())
     }
@@ -158,7 +169,7 @@ impl<T: Serialize> Signed<T> {
 pub struct UserRegisterPayload {
     pub server_url: Url,
     pub id_url: Url,
-    pub id_key: UserKey,
+    pub id_key: PubKey,
     pub challenge_nonce: u32,
 }
 
@@ -387,7 +398,7 @@ pub struct RoomMetadata {
     pub member_permission: Option<MemberPermission>,
     /// The peer user, if this is a peer chat room.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub peer_user: Option<UserKey>,
+    pub peer_user: Option<PubKey>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -409,7 +420,7 @@ pub struct CreateGroup {
 /// Peer-to-peer chat room with exactly two symmetric users.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CreatePeerChat {
-    pub peer: UserKey,
+    pub peer: PubKey,
 }
 
 /// A collection of room members, with these invariants:
@@ -443,7 +454,7 @@ impl TryFrom<Vec<RoomMember>> for RoomMemberList {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RoomMember {
     pub permission: MemberPermission,
-    pub user: UserKey,
+    pub user: PubKey,
 }
 
 /// Proof of room membership for read-access.
@@ -466,10 +477,10 @@ pub struct RoomAdminPayload {
 pub enum RoomAdminOp {
     AddMember {
         permission: MemberPermission,
-        user: UserKey,
+        user: PubKey,
     },
     RemoveMember {
-        user: UserKey,
+        user: PubKey,
     },
     // TODO: RU
 }
@@ -533,19 +544,19 @@ mod sql_impl {
         }
     }
 
-    impl ToSql for UserKey {
+    impl ToSql for PubKey {
         fn to_sql(&self) -> Result<ToSqlOutput<'_>> {
             // TODO: Extensive key format?
             self.0.to_sql()
         }
     }
 
-    impl FromSql for UserKey {
+    impl FromSql for PubKey {
         fn column_result(value: ValueRef<'_>) -> FromSqlResult<Self> {
             let rawkey = <[u8; PUBLIC_KEY_LENGTH]>::column_result(value)?;
             let key = VerifyingKey::from_bytes(&rawkey)
                 .map_err(|err| FromSqlError::Other(format!("invalid pubkey: {err}").into()))?;
-            Ok(UserKey(key.to_bytes()))
+            Ok(PubKey(key.to_bytes()))
         }
     }
 
@@ -596,10 +607,12 @@ mod tests {
     #[test]
     fn canonical_msg() {
         let mut fake_rng = rand::rngs::mock::StepRng::new(0x42, 1);
-        let signing_key = SigningKey::from_bytes(&[0x42; 32]);
+        let id_key = SigningKey::from_bytes(&[0x42; 32]);
+        let act_key = SigningKey::from_bytes(&[0x43; 32]);
         let timestamp = 0xDEAD_BEEF;
         let msg = Signed::sign(
-            &signing_key,
+            &PubKey(id_key.verifying_key().to_bytes()),
+            &act_key,
             timestamp,
             &mut fake_rng,
             ChatPayload {
@@ -611,7 +624,7 @@ mod tests {
 
         let json = serde_jcs::to_string(&msg).unwrap();
         let expect = expect![[
-            r#"{"sig":"18ee190722bebfd438c82f34890540d91578b4ba9f6c0c6011cc4fd751a321e32e9442d00dad1920799c54db011694c72a9ba993b408922e9997119209aa5e09","signee":{"nonce":66,"payload":{"rich_text":["hello"],"room":"42","typ":"chat"},"timestamp":3735928559,"user":"2152f8d19b791d24453242e15f2eab6cb7cffa7b6a5ed30097960e069881db12"}}"#
+            r#"{"sig":"74ca2895ac94e741e086bae28ce8c282bf375e3e59a3408f562420d72e98d799f7e627879aa883fa0804a0799eb9b90398150b0150c2e3550635ff28b9991502","signee":{"act_key":"22fc297792f0b6ffc0bfcfdb7edb0c0aa14e025a365ec0e342e86e3829cb74b6","id_key":"2152f8d19b791d24453242e15f2eab6cb7cffa7b6a5ed30097960e069881db12","nonce":66,"payload":{"rich_text":["hello"],"room":"42","typ":"chat"},"timestamp":3735928559}}"#
         ]];
         expect.assert_eq(&json);
 
@@ -657,7 +670,7 @@ mod tests {
             room: Id(42),
             op: RoomAdminOp::AddMember {
                 permission: MemberPermission::POST_CHAT,
-                user: UserKey([0x42; PUBLIC_KEY_LENGTH]),
+                user: PubKey([0x42; PUBLIC_KEY_LENGTH]),
             },
         };
         let raw = serde_jcs::to_string(&data).unwrap();

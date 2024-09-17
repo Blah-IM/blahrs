@@ -579,6 +579,13 @@ components:
             nonce:
               type: integer
               format: uint32
+            timestamp:
+              type: integer
+              format: uint64
+            id_key:
+              type: string
+            act_key:
+              type: string
             payload:
               type: object
               properties:
@@ -597,6 +604,13 @@ components:
             nonce:
               type: integer
               format: uint32
+            timestamp:
+              type: integer
+              format: uint64
+            id_key:
+              type: string
+            act_key:
+              type: string
             payload:
               oneOf:
 
@@ -625,19 +639,6 @@ components:
                     user:
                       type: string
 
-
-      example:
-        sig: 99a77e836538268839ed3419c649eefb043cb51d448f641cc2a1c523811aab4aacd09f92e7c0688ffd659bfc6acb764fea79979a491e132bf6a56dd23adc1d09
-        signee:
-          nonce: 670593955
-          payload:
-            permission: 1
-            room: 7ed9e067-ec37-4054-9fc2-b1bd890929bd
-            typ: add_member
-            user: 83ce46ced47ec0391c64846cbb6c507250ead4985b6a044d68751edc46015dd7
-          timestamp: 1724966284
-          user: 83ce46ced47ec0391c64846cbb6c507250ead4985b6a044d68751edc46015dd7
-
     Signed-Chat:
       type: object
       properties:
@@ -649,6 +650,13 @@ components:
             nonce:
               type: integer
               format: uint32
+            timestamp:
+              type: integer
+              format: uint64
+            id_key:
+              type: string
+            act_key:
+              type: string
             payload:
               type: object
               properties:
@@ -659,16 +667,6 @@ components:
                   type: string
                 rich_text:
                   $ref: '$/components/schemas/RichText'
-      example:
-        sig: 99a77e836538268839ed3419c649eefb043cb51d448f641cc2a1c523811aab4aacd09f92e7c0688ffd659bfc6acb764fea79979a491e132bf6a56dd23adc1d09
-        signee:
-          nonce: 670593955
-          payload:
-            typ: chat
-            room: 7ed9e067-ec37-4054-9fc2-b1bd890929bd
-            rich_text: ["before ",["bold ",{"b":true}],["italic bold ",{"b":true,"i":true}],"end"]
-          timestamp: 1724966284
-          user: 83ce46ced47ec0391c64846cbb6c507250ead4985b6a044d68751edc46015dd7
 
     WithMsgId-Signed-Chat:
       allOf:
@@ -690,6 +688,13 @@ components:
             nonce:
               type: integer
               format: uint32
+            timestamp:
+              type: integer
+              format: uint64
+            id_key:
+              type: string
+            act_key:
+              type: string
             payload:
               oneOf:
                 - type: object
@@ -707,20 +712,6 @@ components:
                     peer:
                       type: string
 
-      example:
-        sig: 99a77e836538268839ed3419c649eefb043cb51d448f641cc2a1c523811aab4aacd09f92e7c0688ffd659bfc6acb764fea79979a491e132bf6a56dd23adc1d09
-        signee:
-          nonce: 670593955
-          payload:
-            typ: create_room
-            attrs: 1 # PUBLIC_READABLE
-            title: 'hello room'
-            members:
-              - user: 83ce46ced47ec0391c64846cbb6c507250ead4985b6a044d68751edc46015dd7
-                permission: -1
-          timestamp: 1724966284
-          user: 83ce46ced47ec0391c64846cbb6c507250ead4985b6a044d68751edc46015dd7
-
     Signed-UserRegister:
       type: object
       properties:
@@ -732,6 +723,13 @@ components:
             nonce:
               type: integer
               format: uint32
+            timestamp:
+              type: integer
+              format: uint64
+            id_key:
+              type: string
+            act_key:
+              type: string
             payload:
               type: object
               properties:
@@ -740,10 +738,14 @@ components:
                   const: 'user_register'
                 server_url:
                   type: string
-                  description: The server URL to register on. Must matches chat server's base_url.
+                  description: |
+                    The server URL to register on. Must matches chat server's base_url.
+                    It's path segment must be normalized, eg. always contains a `/` path for top-level.
                 id_url:
                   type: string
-                  description: The identity server URL. Must be in form `https://<domain>`.
+                  description: |
+                    The identity server URL. Must be in form `https://<domain>/`.
+                    It's path segment must be normalized, eg. always contains a `/` path for top-level.
                 id_key:
                   type: string
                   description: Hex encoded user primary key `id_key`.
@@ -771,6 +773,13 @@ components:
                   nonce:
                     type: integer
                     format: uint32
+                  timestamp:
+                    type: integer
+                    format: uint64
+                  id_key:
+                    type: string
+                  act_key:
+                    type: string
                   payload:
                     type: object
                     properties:
@@ -796,6 +805,13 @@ components:
                 nonce:
                   type: integer
                   format: uint32
+                timestamp:
+                  type: integer
+                  format: uint64
+                id_key:
+                  type: string
+                act_key:
+                  type: string
                 payload:
                   type: object
                   properties:

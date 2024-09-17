@@ -1,11 +1,16 @@
+use std::borrow::Borrow;
 use std::ops::DerefMut;
 use std::path::PathBuf;
 
 use anyhow::{ensure, Context, Result};
+use axum::http::StatusCode;
+use blah_types::{ServerPermission, UserKey};
 use parking_lot::Mutex;
-use rusqlite::{params, Connection, OpenFlags};
+use rusqlite::{params, Connection, OpenFlags, OptionalExtension};
 use serde::Deserialize;
 use serde_inline_default::serde_inline_default;
+
+use crate::ApiError;
 
 const DEFAULT_DATABASE_PATH: &str = "/var/lib/blahd/db.sqlite";
 
@@ -96,6 +101,31 @@ impl Database {
         self.conn.lock()
     }
 }
+
+pub trait ConnectionExt: Borrow<Connection> {
+    fn get_user(&self, user: &UserKey) -> Result<(i64, ServerPermission), ApiError> {
+        self.borrow()
+            .query_row(
+                r"
+                SELECT `uid`, `permission`
+                FROM `valid_user_act_key`
+                WHERE (`id_key`, `act_key`) = (?, ?)
+                ",
+                params![user.id_key, user.act_key],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()?
+            .ok_or_else(|| {
+                error_response!(
+                    StatusCode::NOT_FOUND,
+                    "not_found",
+                    "the user does not exist",
+                )
+            })
+    }
+}
+
+impl ConnectionExt for Connection {}
 
 #[test]
 fn init_sql_valid() {

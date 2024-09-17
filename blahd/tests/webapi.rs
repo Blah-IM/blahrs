@@ -11,7 +11,7 @@ use anyhow::Result;
 use axum::http::HeaderMap;
 use blah_types::{
     get_timestamp, AuthPayload, ChatPayload, CreateGroup, CreatePeerChat, CreateRoomPayload, Id,
-    MemberPermission, RichText, RoomAdminOp, RoomAdminPayload, RoomAttrs, RoomMetadata,
+    MemberPermission, PubKey, RichText, RoomAdminOp, RoomAdminPayload, RoomAttrs, RoomMetadata,
     ServerPermission, Signed, SignedChatMsg, UserActKeyDesc, UserIdentityDesc, UserKey,
     UserProfile, UserRegisterPayload, WithMsgId, X_BLAH_DIFFICULTY, X_BLAH_NONCE,
 };
@@ -52,14 +52,31 @@ unsafe_allow_id_url_custom_port = true
     )
 };
 
-static ALICE_PRIV: LazyLock<SigningKey> = LazyLock::new(|| SigningKey::from_bytes(&[b'A'; 32]));
-static ALICE: LazyLock<UserKey> = LazyLock::new(|| UserKey(ALICE_PRIV.verifying_key().to_bytes()));
-static BOB_PRIV: LazyLock<SigningKey> = LazyLock::new(|| SigningKey::from_bytes(&[b'B'; 32]));
-static BOB: LazyLock<UserKey> = LazyLock::new(|| UserKey(BOB_PRIV.verifying_key().to_bytes()));
-static CAROL_PRIV: LazyLock<SigningKey> = LazyLock::new(|| SigningKey::from_bytes(&[b'C'; 32]));
-static CAROL: LazyLock<UserKey> = LazyLock::new(|| UserKey(CAROL_PRIV.verifying_key().to_bytes()));
+struct User {
+    pubkeys: UserKey,
+    id_priv: SigningKey,
+    act_priv: SigningKey,
+}
 
-static CAROL_ACT_PRIV: LazyLock<SigningKey> = LazyLock::new(|| SigningKey::from_bytes(&[b'c'; 32]));
+impl User {
+    fn new(b: u8) -> Self {
+        assert!(b.is_ascii_uppercase());
+        let id_priv = SigningKey::from_bytes(&[b; 32]);
+        let act_priv = SigningKey::from_bytes(&[b.to_ascii_lowercase(); 32]);
+        Self {
+            pubkeys: UserKey {
+                id_key: PubKey(id_priv.verifying_key().to_bytes()),
+                act_key: PubKey(act_priv.verifying_key().to_bytes()),
+            },
+            id_priv,
+            act_priv,
+        }
+    }
+}
+
+static ALICE: LazyLock<User> = LazyLock::new(|| User::new(b'A'));
+static BOB: LazyLock<User> = LazyLock::new(|| User::new(b'B'));
+static CAROL: LazyLock<User> = LazyLock::new(|| User::new(b'C'));
 
 #[fixture]
 fn rng() -> impl RngCore {
@@ -165,15 +182,25 @@ impl Server {
             .map_ok(|resp| resp.unwrap())
     }
 
+    fn sign<T: Serialize>(&self, user: &User, msg: T) -> Signed<T> {
+        Signed::sign(
+            &user.pubkeys.id_key,
+            &user.act_priv,
+            get_timestamp(),
+            &mut *self.rng.borrow_mut(),
+            msg,
+        )
+        .unwrap()
+    }
+
     fn create_room(
         &self,
-        key: &SigningKey,
+        user: &User,
         attrs: RoomAttrs,
         title: &str,
     ) -> impl Future<Output = Result<Id>> + use<'_> {
-        let req = sign(
-            key,
-            &mut *self.rng.borrow_mut(),
+        let req = self.sign(
+            user,
             CreateRoomPayload::Group(CreateGroup {
                 attrs,
                 title: title.to_string(),
@@ -190,17 +217,16 @@ impl Server {
     fn join_room(
         &self,
         rid: Id,
-        key: &SigningKey,
+        user: &User,
         permission: MemberPermission,
     ) -> impl Future<Output = Result<()>> + use<'_> {
-        let req = sign(
-            key,
-            &mut *self.rng.borrow_mut(),
+        let req = self.sign(
+            user,
             RoomAdminPayload {
                 room: rid,
                 op: RoomAdminOp::AddMember {
                     permission,
-                    user: UserKey(key.verifying_key().to_bytes()),
+                    user: user.pubkeys.id_key.clone(),
                 },
             },
         );
@@ -208,14 +234,13 @@ impl Server {
             .map_ok(|None| {})
     }
 
-    fn leave_room(&self, rid: Id, key: &SigningKey) -> impl Future<Output = Result<()>> + use<'_> {
-        let req = sign(
-            key,
-            &mut *self.rng.borrow_mut(),
+    fn leave_room(&self, rid: Id, user: &User) -> impl Future<Output = Result<()>> + use<'_> {
+        let req = self.sign(
+            user,
             RoomAdminPayload {
                 room: rid,
                 op: RoomAdminOp::RemoveMember {
-                    user: UserKey(key.verifying_key().to_bytes()),
+                    user: user.pubkeys.id_key.clone(),
                 },
             },
         );
@@ -226,12 +251,11 @@ impl Server {
     fn post_chat(
         &self,
         rid: Id,
-        key: &SigningKey,
+        user: &User,
         text: &str,
     ) -> impl Future<Output = Result<WithMsgId<SignedChatMsg>>> + use<'_> {
-        let msg = sign(
-            key,
-            &mut *self.rng.borrow_mut(),
+        let msg = self.sign(
+            user,
             ChatPayload {
                 room: rid,
                 rich_text: text.into(),
@@ -262,7 +286,7 @@ fn server() -> Server {
         let mut add_user = conn
             .prepare(
                 r"
-                INSERT INTO `user` (`userkey`, `permission`, `last_fetch_time`, `id_desc`)
+                INSERT INTO `user` (`id_key`, `permission`, `last_fetch_time`, `id_desc`)
                 VALUES (?, ?, 0, '{}')
                 ",
             )
@@ -279,9 +303,13 @@ fn server() -> Server {
             (&*ALICE, ServerPermission::ALL),
             (&BOB, ServerPermission::empty()),
         ] {
-            add_user.execute(params![user, perm]).unwrap();
+            add_user
+                .execute(params![user.pubkeys.id_key, perm])
+                .unwrap();
             let uid = conn.last_insert_rowid();
-            add_act_key.execute(params![uid, user, i64::MAX]).unwrap();
+            add_act_key
+                .execute(params![uid, user.pubkeys.act_key, i64::MAX])
+                .unwrap();
         }
     }
     let db = Database::from_raw(conn).unwrap();
@@ -314,12 +342,16 @@ async fn smoke(server: Server) {
     assert_eq!(got, exp);
 }
 
-fn sign<T: Serialize>(key: &SigningKey, rng: &mut dyn RngCore, payload: T) -> Signed<T> {
-    Signed::sign(key, get_timestamp(), rng, payload).unwrap()
-}
-
-fn auth(key: &SigningKey, rng: &mut impl RngCore) -> String {
-    serde_json::to_string(&sign(key, rng, AuthPayload {})).unwrap()
+fn auth(user: &User, rng: &mut impl RngCore) -> String {
+    let msg = Signed::sign(
+        &user.pubkeys.id_key,
+        &user.act_priv,
+        get_timestamp(),
+        rng,
+        AuthPayload {},
+    )
+    .unwrap();
+    serde_json::to_string(&msg).unwrap()
 }
 
 #[rstest]
@@ -345,26 +377,26 @@ async fn room_create_get(server: Server, ref mut rng: impl RngCore, #[case] publ
 
     // Alice has permission.
     let rid = server
-        .create_room(&ALICE_PRIV, room_meta.attrs, title)
+        .create_room(&ALICE, room_meta.attrs, title)
         .await
         .unwrap();
     room_meta.rid = rid;
 
     // Bob has no permission.
     server
-        .create_room(&BOB_PRIV, room_meta.attrs, title)
+        .create_room(&BOB, room_meta.attrs, title)
         .await
         .expect_api_err(StatusCode::FORBIDDEN, "permission_denied");
 
     // Alice can always access it.
     let got_meta = server
-        .get::<RoomMetadata>(&format!("/room/{rid}"), Some(&auth(&ALICE_PRIV, rng)))
+        .get::<RoomMetadata>(&format!("/room/{rid}"), Some(&auth(&ALICE, rng)))
         .await
         .unwrap();
     assert_eq!(got_meta, room_meta);
 
     // Bob or public can access it when it is public.
-    for auth in [None, Some(auth(&BOB_PRIV, rng))] {
+    for auth in [None, Some(auth(&BOB, rng))] {
         let resp = server
             .get::<RoomMetadata>(&format!("/room/{rid}"), auth.as_deref())
             .await;
@@ -401,13 +433,13 @@ async fn room_create_get(server: Server, ref mut rng: impl RngCore, #[case] publ
         .await
         .expect_api_err(StatusCode::UNAUTHORIZED, "unauthorized");
     let got_joined = server
-        .get::<RoomList>("/room?filter=joined", Some(&auth(&ALICE_PRIV, rng)))
+        .get::<RoomList>("/room?filter=joined", Some(&auth(&ALICE, rng)))
         .await
         .unwrap();
     assert_eq!(got_joined, expect_list(true, Some(MemberPermission::ALL)));
 
     let got_joined = server
-        .get::<RoomList>("/room?filter=joined", Some(&auth(&BOB_PRIV, rng)))
+        .get::<RoomList>("/room?filter=joined", Some(&auth(&BOB, rng)))
         .await
         .unwrap();
     assert_eq!(got_joined, expect_list(false, None));
@@ -417,41 +449,40 @@ async fn room_create_get(server: Server, ref mut rng: impl RngCore, #[case] publ
 #[tokio::test]
 async fn room_join_leave(server: Server, ref mut rng: impl RngCore) {
     let rid_pub = server
-        .create_room(&ALICE_PRIV, RoomAttrs::PUBLIC_JOINABLE, "public room")
+        .create_room(&ALICE, RoomAttrs::PUBLIC_JOINABLE, "public room")
         .await
         .unwrap();
     let rid_priv = server
-        .create_room(&ALICE_PRIV, RoomAttrs::empty(), "private room")
+        .create_room(&ALICE, RoomAttrs::empty(), "private room")
         .await
         .unwrap();
 
-    let join =
-        |rid: Id, key: &SigningKey| server.join_room(rid, key, MemberPermission::MAX_SELF_ADD);
+    let join = |rid, user| server.join_room(rid, user, MemberPermission::MAX_SELF_ADD);
 
     // Ok.
-    join(rid_pub, &BOB_PRIV).await.unwrap();
+    join(rid_pub, &BOB).await.unwrap();
     // Already joined.
-    join(rid_pub, &BOB_PRIV)
+    join(rid_pub, &BOB)
         .await
         .expect_api_err(StatusCode::CONFLICT, "exists");
     // Not permitted.
-    join(rid_priv, &BOB_PRIV)
+    join(rid_priv, &BOB)
         .await
         .expect_api_err(StatusCode::NOT_FOUND, "not_found");
     // Not exists.
-    join(Id::INVALID, &BOB_PRIV)
+    join(Id::INVALID, &BOB)
         .await
         .expect_api_err(StatusCode::NOT_FOUND, "not_found");
     // Overly high permission.
     server
-        .join_room(rid_priv, &BOB_PRIV, MemberPermission::ALL)
+        .join_room(rid_priv, &BOB, MemberPermission::ALL)
         .await
         .expect_api_err(StatusCode::BAD_REQUEST, "deserialization");
 
     // Bob is joined now.
     assert_eq!(
         server
-            .get::<RoomList>("/room?filter=joined", Some(&auth(&BOB_PRIV, rng)))
+            .get::<RoomList>("/room?filter=joined", Some(&auth(&BOB, rng)))
             .await
             .unwrap()
             .rooms
@@ -459,20 +490,20 @@ async fn room_join_leave(server: Server, ref mut rng: impl RngCore) {
         1,
     );
 
-    let leave = |rid: Id, key: &SigningKey| server.leave_room(rid, key);
+    let leave = |rid, user| server.leave_room(rid, user);
 
     // Ok.
-    leave(rid_pub, &BOB_PRIV).await.unwrap();
+    leave(rid_pub, &BOB).await.unwrap();
     // Already left.
-    leave(rid_pub, &BOB_PRIV)
+    leave(rid_pub, &BOB)
         .await
         .expect_api_err(StatusCode::NOT_FOUND, "not_found");
     // Unpermitted and not inside.
-    leave(rid_priv, &BOB_PRIV)
+    leave(rid_priv, &BOB)
         .await
         .expect_api_err(StatusCode::NOT_FOUND, "not_found");
     // Invalid room.
-    leave(Id::INVALID, &BOB_PRIV)
+    leave(Id::INVALID, &BOB)
         .await
         .expect_api_err(StatusCode::NOT_FOUND, "not_found");
 }
@@ -482,21 +513,20 @@ async fn room_join_leave(server: Server, ref mut rng: impl RngCore) {
 async fn room_chat_post_read(server: Server, ref mut rng: impl RngCore) {
     let rid_pub = server
         .create_room(
-            &ALICE_PRIV,
+            &ALICE,
             RoomAttrs::PUBLIC_READABLE | RoomAttrs::PUBLIC_JOINABLE,
             "public room",
         )
         .await
         .unwrap();
     let rid_priv = server
-        .create_room(&ALICE_PRIV, RoomAttrs::empty(), "private room")
+        .create_room(&ALICE, RoomAttrs::empty(), "private room")
         .await
         .unwrap();
 
-    let mut chat = |rid: Id, key: &SigningKey, msg: &str| {
-        sign(
-            key,
-            rng,
+    let chat = |rid: Id, user: &User, msg: &str| {
+        server.sign(
+            user,
             ChatPayload {
                 room: rid,
                 rich_text: RichText::from(msg),
@@ -510,8 +540,8 @@ async fn room_chat_post_read(server: Server, ref mut rng: impl RngCore) {
     };
 
     // Ok.
-    let chat1 = chat(rid_pub, &ALICE_PRIV, "one");
-    let chat2 = chat(rid_pub, &ALICE_PRIV, "two");
+    let chat1 = chat(rid_pub, &ALICE, "one");
+    let chat2 = chat(rid_pub, &ALICE, "two");
     let cid1 = post(rid_pub, chat1.clone()).await.unwrap();
     let cid2 = post(rid_pub, chat2.clone()).await.unwrap();
 
@@ -521,26 +551,26 @@ async fn room_chat_post_read(server: Server, ref mut rng: impl RngCore) {
         .expect_api_err(StatusCode::BAD_REQUEST, "duplicated_nonce");
 
     // Wrong room.
-    post(rid_pub, chat(rid_priv, &ALICE_PRIV, "wrong room"))
+    post(rid_pub, chat(rid_priv, &ALICE, "wrong room"))
         .await
         .expect_api_err(StatusCode::BAD_REQUEST, "invalid_request");
 
     // Not a member.
-    post(rid_pub, chat(rid_pub, &BOB_PRIV, "not a member"))
+    post(rid_pub, chat(rid_pub, &BOB, "not a member"))
         .await
         .expect_api_err(StatusCode::NOT_FOUND, "not_found");
 
     // Is a member but without permission.
     server
-        .join_room(rid_pub, &BOB_PRIV, MemberPermission::empty())
+        .join_room(rid_pub, &BOB, MemberPermission::empty())
         .await
         .unwrap();
-    post(rid_pub, chat(rid_pub, &BOB_PRIV, "no permission"))
+    post(rid_pub, chat(rid_pub, &BOB, "no permission"))
         .await
         .expect_api_err(StatusCode::FORBIDDEN, "permission_denied");
 
     // Room not exists.
-    post(Id::INVALID, chat(Id::INVALID, &ALICE_PRIV, "not permitted"))
+    post(Id::INVALID, chat(Id::INVALID, &ALICE, "not permitted"))
         .await
         .expect_api_err(StatusCode::NOT_FOUND, "not_found");
 
@@ -605,19 +635,13 @@ async fn room_chat_post_read(server: Server, ref mut rng: impl RngCore) {
 
     // Not a member.
     server
-        .get::<RoomMsgs>(
-            &format!("/room/{rid_priv}/msg"),
-            Some(&auth(&BOB_PRIV, rng)),
-        )
+        .get::<RoomMsgs>(&format!("/room/{rid_priv}/msg"), Some(&auth(&BOB, rng)))
         .await
         .expect_api_err(StatusCode::NOT_FOUND, "not_found");
 
     // Ok.
     let msgs = server
-        .get::<RoomMsgs>(
-            &format!("/room/{rid_priv}/msg"),
-            Some(&auth(&ALICE_PRIV, rng)),
-        )
+        .get::<RoomMsgs>(&format!("/room/{rid_priv}/msg"), Some(&auth(&ALICE, rng)))
         .await
         .unwrap();
     assert_eq!(msgs, RoomMsgs::default());
@@ -629,18 +653,18 @@ async fn last_seen(server: Server, ref mut rng: impl RngCore) {
     let title = "public room";
     let attrs = RoomAttrs::PUBLIC_READABLE | RoomAttrs::PUBLIC_JOINABLE;
     let member_perm = MemberPermission::ALL;
-    let rid = server.create_room(&ALICE_PRIV, attrs, title).await.unwrap();
+    let rid = server.create_room(&ALICE, attrs, title).await.unwrap();
     server
-        .join_room(rid, &BOB_PRIV, MemberPermission::MAX_SELF_ADD)
+        .join_room(rid, &BOB, MemberPermission::MAX_SELF_ADD)
         .await
         .unwrap();
 
-    let alice_chat1 = server.post_chat(rid, &ALICE_PRIV, "alice1").await.unwrap();
-    let alice_chat2 = server.post_chat(rid, &ALICE_PRIV, "alice2").await.unwrap();
+    let alice_chat1 = server.post_chat(rid, &ALICE, "alice1").await.unwrap();
+    let alice_chat2 = server.post_chat(rid, &ALICE, "alice2").await.unwrap();
 
     // 2 new msgs.
     let rooms = server
-        .get::<RoomList>("/room?filter=unseen", Some(&auth(&ALICE_PRIV, rng)))
+        .get::<RoomList>("/room?filter=unseen", Some(&auth(&ALICE, rng)))
         .await
         .unwrap();
     assert_eq!(
@@ -660,21 +684,21 @@ async fn last_seen(server: Server, ref mut rng: impl RngCore) {
         }
     );
 
-    let seen = |key: &SigningKey, cid: Id| {
+    let seen = |user: &User, cid: Id| {
         server.request::<NoContent, NoContent>(
             Method::POST,
             &format!("/room/{rid}/msg/{cid}/seen"),
-            Some(&auth(key, &mut *server.rng.borrow_mut())),
+            Some(&auth(user, &mut *server.rng.borrow_mut())),
             None,
         )
     };
 
     // Mark the first one seen.
-    seen(&ALICE_PRIV, alice_chat1.cid).await.unwrap();
+    seen(&ALICE, alice_chat1.cid).await.unwrap();
 
     // 1 new msg.
     let rooms = server
-        .get::<RoomList>("/room?filter=unseen", Some(&auth(&ALICE_PRIV, rng)))
+        .get::<RoomList>("/room?filter=unseen", Some(&auth(&ALICE, rng)))
         .await
         .unwrap();
     assert_eq!(
@@ -695,17 +719,17 @@ async fn last_seen(server: Server, ref mut rng: impl RngCore) {
     );
 
     // Mark the second one seen. Now there is no new messages.
-    seen(&ALICE_PRIV, alice_chat2.cid).await.unwrap();
+    seen(&ALICE, alice_chat2.cid).await.unwrap();
     let rooms = server
-        .get::<RoomList>("/room?filter=unseen", Some(&auth(&ALICE_PRIV, rng)))
+        .get::<RoomList>("/room?filter=unseen", Some(&auth(&ALICE, rng)))
         .await
         .unwrap();
     assert_eq!(rooms, RoomList::default());
 
     // Marking a seen message seen is a no-op.
-    seen(&ALICE_PRIV, alice_chat2.cid).await.unwrap();
+    seen(&ALICE, alice_chat2.cid).await.unwrap();
     let rooms = server
-        .get::<RoomList>("/room?filter=unseen", Some(&auth(&ALICE_PRIV, rng)))
+        .get::<RoomList>("/room?filter=unseen", Some(&auth(&ALICE, rng)))
         .await
         .unwrap();
     assert_eq!(rooms, RoomList::default());
@@ -714,11 +738,12 @@ async fn last_seen(server: Server, ref mut rng: impl RngCore) {
 #[rstest]
 #[tokio::test]
 async fn peer_chat(server: Server, ref mut rng: impl RngCore) {
-    let mut create_chat = |src: &SigningKey, tgt: &UserKey| {
-        let req = sign(
+    let create_chat = |src: &User, tgt: &User| {
+        let req = server.sign(
             src,
-            rng,
-            CreateRoomPayload::PeerChat(CreatePeerChat { peer: tgt.clone() }),
+            CreateRoomPayload::PeerChat(CreatePeerChat {
+                peer: tgt.pubkeys.id_key.clone(),
+            }),
         );
         server
             .request::<_, Id>(Method::POST, "/room/create", None, Some(req))
@@ -726,15 +751,15 @@ async fn peer_chat(server: Server, ref mut rng: impl RngCore) {
     };
 
     // Bob disallows peer chat.
-    create_chat(&ALICE_PRIV, &BOB)
+    create_chat(&ALICE, &BOB)
         .await
         .expect_api_err(StatusCode::NOT_FOUND, "not_found");
 
     // Alice accepts bob.
-    let rid = create_chat(&BOB_PRIV, &ALICE).await.unwrap();
+    let rid = create_chat(&BOB, &ALICE).await.unwrap();
 
     // Room already exists.
-    create_chat(&BOB_PRIV, &ALICE)
+    create_chat(&BOB, &ALICE)
         .await
         .expect_api_err(StatusCode::CONFLICT, "exists");
 
@@ -750,7 +775,7 @@ async fn peer_chat(server: Server, ref mut rng: impl RngCore) {
         .expect_api_err(StatusCode::NOT_FOUND, "not_found");
 
     // Both alice and bob are in the room.
-    for (key, peer) in [(&*ALICE_PRIV, &*BOB), (&*BOB_PRIV, &*ALICE)] {
+    for (key, peer) in [(&*ALICE, &*BOB), (&*BOB, &*ALICE)] {
         let mut expect_meta = RoomMetadata {
             rid,
             title: None,
@@ -769,7 +794,7 @@ async fn peer_chat(server: Server, ref mut rng: impl RngCore) {
         assert_eq!(meta, expect_meta);
 
         expect_meta.member_permission = Some(MemberPermission::MAX_PEER_CHAT);
-        expect_meta.peer_user = Some(peer.clone());
+        expect_meta.peer_user = Some(peer.pubkeys.id_key.clone());
         let rooms = server
             .get::<RoomList>("/room?filter=joined", Some(&auth(key, rng)))
             .await
@@ -789,14 +814,14 @@ async fn peer_chat(server: Server, ref mut rng: impl RngCore) {
 async fn register(server: Server) {
     let rid = server
         .create_room(
-            &ALICE_PRIV,
+            &ALICE,
             RoomAttrs::PUBLIC_READABLE | RoomAttrs::PUBLIC_JOINABLE,
             "public room",
         )
         .await
         .unwrap();
 
-    let get_me = |user: Option<&SigningKey>| {
+    let get_me = |user: Option<&User>| {
         let auth = user.map(|user| auth(user, &mut *server.rng()));
         server
             .request::<(), ()>(Method::GET, "/user/me", auth.as_deref(), None)
@@ -819,10 +844,10 @@ async fn register(server: Server) {
     };
 
     // Alice is registered.
-    get_me(Some(&ALICE_PRIV)).await.unwrap();
+    get_me(Some(&ALICE)).await.unwrap();
 
     // Carol is not registered.
-    let (challenge_nonce, diff) = get_me(Some(&CAROL_PRIV)).await.unwrap_err();
+    let (challenge_nonce, diff) = get_me(Some(&CAROL)).await.unwrap_err();
     assert_eq!(diff, REGISTER_DIFFICULTY);
 
     // Without token.
@@ -830,7 +855,7 @@ async fn register(server: Server) {
     assert_eq!(ret2, (challenge_nonce, diff));
 
     let mut req = UserRegisterPayload {
-        id_key: CAROL.clone(),
+        id_key: CAROL.pubkeys.id_key.clone(),
         // Fake values.
         server_url: "http://invalid.example.com".parse().unwrap(),
         id_url: "file:///etc/passwd".parse().unwrap(),
@@ -842,7 +867,7 @@ async fn register(server: Server) {
             .map_ok(|_| {})
     };
     let sign_with_difficulty = |req: &UserRegisterPayload, pass: bool| loop {
-        let signed = sign(&CAROL_PRIV, &mut *server.rng(), req.clone());
+        let signed = server.sign(&CAROL, req.clone());
         let mut h = Sha256::new();
         h.update(signed.canonical_signee());
         let h = h.finalize();
@@ -850,8 +875,7 @@ async fn register(server: Server) {
             return signed;
         }
     };
-    let register_fast =
-        |req: &UserRegisterPayload| register(sign(&CAROL_PRIV, &mut *server.rng(), req.clone()));
+    let register_fast = |req: &UserRegisterPayload| register(server.sign(&CAROL, req.clone()));
 
     register_fast(&req)
         .await
@@ -938,26 +962,32 @@ async fn register(server: Server) {
             (StatusCode::OK, desc.clone())
         }}
     };
+    let sign_profile = |url: Url| {
+        server.sign(
+            &CAROL,
+            UserProfile {
+                preferred_chat_server_urls: Vec::new(),
+                id_urls: vec![url],
+            },
+        )
+    };
     let mut id_desc = {
-        let act_key = sign(
-            &CAROL_PRIV,
+        // Sign using id_key.
+        let act_key = Signed::sign(
+            &CAROL.pubkeys.id_key,
+            &CAROL.id_priv,
+            get_timestamp(),
             &mut *server.rng(),
             UserActKeyDesc {
-                act_key: UserKey(CAROL_ACT_PRIV.verifying_key().to_bytes()),
+                act_key: CAROL.pubkeys.act_key.clone(),
                 expire_time: u64::MAX,
                 comment: "comment".into(),
             },
-        );
-        let profile = sign(
-            &CAROL_ACT_PRIV,
-            &mut *server.rng(),
-            UserProfile {
-                preferred_chat_server_urls: Vec::new(),
-                id_urls: vec![req.id_url.join("/mismatch").unwrap()],
-            },
-        );
+        )
+        .unwrap();
+        let profile = sign_profile(req.id_url.join("/mismatch").unwrap());
         UserIdentityDesc {
-            id_key: CAROL.clone(),
+            id_key: CAROL.pubkeys.id_key.clone(),
             act_keys: vec![act_key],
             profile,
         }
@@ -970,28 +1000,21 @@ async fn register(server: Server) {
         .expect_api_err(StatusCode::UNAUTHORIZED, "invalid_id_description");
 
     // Still not registered.
-    get_me(Some(&CAROL_PRIV)).await.unwrap_err();
+    get_me(Some(&CAROL)).await.unwrap_err();
     server
-        .join_room(rid, &CAROL_PRIV, MemberPermission::MAX_SELF_ADD)
+        .join_room(rid, &CAROL, MemberPermission::MAX_SELF_ADD)
         .await
         .expect_api_err(StatusCode::NOT_FOUND, "not_found");
 
     // Finally pass.
-    id_desc.profile = sign(
-        &CAROL_ACT_PRIV,
-        &mut *server.rng(),
-        UserProfile {
-            preferred_chat_server_urls: Vec::new(),
-            id_urls: vec![req.id_url.clone()],
-        },
-    );
+    id_desc.profile = sign_profile(req.id_url.clone());
     set_id_desc(&id_desc);
     register(sign_with_difficulty(&req, true)).await.unwrap();
 
     // Registered now.
-    get_me(Some(&CAROL_PRIV)).await.unwrap();
+    get_me(Some(&CAROL)).await.unwrap();
     server
-        .join_room(rid, &CAROL_PRIV, MemberPermission::MAX_SELF_ADD)
+        .join_room(rid, &CAROL, MemberPermission::MAX_SELF_ADD)
         .await
         .unwrap();
 }

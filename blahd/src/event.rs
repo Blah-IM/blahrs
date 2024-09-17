@@ -7,20 +7,20 @@ use std::sync::Arc;
 use std::task::{Context, Poll};
 use std::time::Duration;
 
-use anyhow::{bail, Context as _, Result};
+use anyhow::{anyhow, bail, Context as _, Result};
 use axum::extract::ws::{Message, WebSocket};
 use blah_types::{AuthPayload, Signed, SignedChatMsg};
 use futures_util::future::Either;
 use futures_util::stream::SplitSink;
 use futures_util::{stream_select, SinkExt as _, Stream, StreamExt};
 use parking_lot::Mutex;
-use rusqlite::{params, OptionalExtension};
 use serde::{de, Deserialize, Serialize};
 use serde_inline_default::serde_inline_default;
 use tokio::sync::broadcast;
 use tokio_stream::wrappers::errors::BroadcastStreamRecvError;
 use tokio_stream::wrappers::BroadcastStream;
 
+use crate::database::ConnectionExt;
 use crate::AppState;
 
 #[derive(Debug, Deserialize)]
@@ -143,19 +143,13 @@ pub async fn handle_ws(st: Arc<AppState>, ws: &mut WebSocket) -> Result<Infallib
         let auth = serde_json::from_str::<Signed<AuthPayload>>(&payload)?;
         st.verify_signed_data(&auth)?;
 
-        st.db
+        let (uid, _) = st
+            .db
             .get()
-            .query_row(
-                r"
-                SELECT `uid`
-                FROM `user`
-                WHERE `userkey` = ?
-                ",
-                params![auth.signee.user],
-                |row| row.get::<_, u64>(0),
-            )
-            .optional()?
-            .context("invalid user")?
+            .get_user(&auth.signee.user)
+            .map_err(|err| anyhow!("{}", err.message))?;
+        // FIXME: Consistency of id's sign.
+        uid as u64
     };
 
     tracing::debug!(%uid, "user connected");

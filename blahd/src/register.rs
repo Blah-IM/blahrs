@@ -4,7 +4,7 @@ use std::time::{Duration, Instant};
 use anyhow::{anyhow, ensure, Context};
 use axum::http::{HeaderMap, HeaderName, StatusCode};
 use blah_types::{
-    get_timestamp, Signed, UserIdentityDesc, UserKey, UserRegisterPayload, X_BLAH_DIFFICULTY,
+    get_timestamp, PubKey, Signed, UserIdentityDesc, UserRegisterPayload, X_BLAH_DIFFICULTY,
     X_BLAH_NONCE,
 };
 use http_body_util::BodyExt;
@@ -270,9 +270,9 @@ pub async fn user_register(
     let uid = txn
         .query_row(
             r"
-            INSERT INTO `user` (`userkey`, `last_fetch_time`, `id_desc`)
+            INSERT INTO `user` (`id_key`, `last_fetch_time`, `id_desc`)
             VALUES (:id_key, :last_fetch_time, :id_desc)
-            ON CONFLICT (`userkey`) DO UPDATE SET
+            ON CONFLICT (`id_key`) DO UPDATE SET
                 `last_fetch_time` = :last_fetch_time,
                 `id_desc` = :id_desc
             WHERE `last_fetch_time` < :last_fetch_time
@@ -323,20 +323,31 @@ pub async fn user_register(
 
 fn validate_id_desc(
     id_url: &Url,
-    id_key: &UserKey,
+    id_key: &PubKey,
     id_desc: &UserIdentityDesc,
     now: u64,
 ) -> anyhow::Result<()> {
     ensure!(*id_key == id_desc.id_key, "id_key mismatch");
 
-    let profile_signing_key = &id_desc.profile.signee.user;
+    ensure!(
+        *id_key == id_desc.profile.signee.user.id_key,
+        "profile id_key mismatch",
+    );
+    let profile_signing_key = &id_desc.profile.signee.user.act_key;
     let mut profile_signed = false;
 
-    for (i, act_key) in id_desc.act_keys.iter().enumerate() {
-        let kdesc = &act_key.signee.payload;
+    for (i, signed_kdesc) in id_desc.act_keys.iter().enumerate() {
+        let kdesc = &signed_kdesc.signee.payload;
         (|| {
-            ensure!(act_key.signee.user == *id_key, "not signed by id_key");
-            act_key.verify().context("signature verification failed")?;
+            // act_key itself is signed by id_key, so both are id_key here.
+            ensure!(
+                signed_kdesc.signee.user.id_key == *id_key
+                    && signed_kdesc.signee.user.act_key == *id_key,
+                "not signed by id_key",
+            );
+            signed_kdesc
+                .verify()
+                .context("signature verification failed")?;
             if now < kdesc.expire_time && *profile_signing_key == kdesc.act_key {
                 profile_signed = true;
             }

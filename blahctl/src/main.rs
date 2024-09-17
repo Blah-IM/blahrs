@@ -4,8 +4,8 @@ use std::{fs, io};
 
 use anyhow::{Context, Result};
 use blah_types::{
-    bitflags, get_timestamp, ChatPayload, CreateGroup, CreateRoomPayload, Id, RichText, RoomAttrs,
-    ServerPermission, Signed, UserKey,
+    bitflags, get_timestamp, ChatPayload, CreateGroup, CreateRoomPayload, Id, PubKey, RichText,
+    RoomAttrs, ServerPermission, Signed,
 };
 use ed25519_dalek::pkcs8::spki::der::pem::LineEnding;
 use ed25519_dalek::pkcs8::{DecodePrivateKey, DecodePublicKey, EncodePrivateKey, EncodePublicKey};
@@ -126,9 +126,9 @@ fn userkey_parser(s: &str) -> clap::error::Result<VerifyingKey> {
 }
 
 impl User {
-    async fn fetch_key(&self) -> Result<UserKey> {
+    async fn fetch_key(&self) -> Result<PubKey> {
         let rawkey = if let Some(key) = &self.key {
-            return Ok(UserKey(key.to_bytes()));
+            return Ok(PubKey(key.to_bytes()));
         } else if let Some(path) = &self.public_key_file {
             fs::read_to_string(path).context("failed to read key file")?
         } else if let Some(url) = &self.url {
@@ -140,7 +140,7 @@ impl User {
         let key = VerifyingKey::from_public_key_pem(&rawkey)
             .context("invalid key")?
             .to_bytes();
-        Ok(UserKey(key))
+        Ok(PubKey(key))
     }
 }
 
@@ -221,7 +221,14 @@ async fn main_api(api_url: Url, command: ApiCommand) -> Result<()> {
                 attrs: attrs.unwrap_or_default(),
                 title,
             });
-            let payload = Signed::sign(&key, get_timestamp(), &mut OsRng, payload)?;
+            // FIXME: Same key.
+            let payload = Signed::sign(
+                &PubKey(key.to_bytes()),
+                &key,
+                get_timestamp(),
+                &mut OsRng,
+                payload,
+            )?;
 
             let ret = client
                 .post(api_url.join("/room/create")?)
@@ -243,7 +250,14 @@ async fn main_api(api_url: Url, command: ApiCommand) -> Result<()> {
                 room: Id(room),
                 rich_text: RichText::from(text),
             };
-            let payload = Signed::sign(&key, get_timestamp(), &mut OsRng, payload)?;
+            // FIXME: Same key.
+            let payload = Signed::sign(
+                &PubKey(key.to_bytes()),
+                &key,
+                get_timestamp(),
+                &mut OsRng,
+                payload,
+            )?;
 
             let ret = client
                 .post(api_url.join(&format!("/room/{room}/msg"))?)
