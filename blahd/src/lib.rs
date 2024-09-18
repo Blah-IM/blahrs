@@ -5,7 +5,7 @@ use std::time::{Duration, SystemTime};
 use anyhow::Result;
 use axum::extract::ws;
 use axum::extract::{Path, Query, State, WebSocketUpgrade};
-use axum::http::{header, HeaderMap, StatusCode};
+use axum::http::{header, HeaderMap, HeaderName, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
@@ -13,7 +13,7 @@ use axum_extra::extract::WithRejection as R;
 use blah_types::{
     ChatPayload, CreateGroup, CreatePeerChat, CreateRoomPayload, Id, MemberPermission, RoomAdminOp,
     RoomAdminPayload, RoomAttrs, RoomMetadata, ServerPermission, Signed, SignedChatMsg, Signee,
-    UserKey, UserRegisterPayload, WithMsgId,
+    UserKey, UserRegisterPayload, WithMsgId, X_BLAH_DIFFICULTY, X_BLAH_NONCE,
 };
 use database::ConnectionExt;
 use ed25519_dalek::SIGNATURE_LENGTH;
@@ -147,7 +147,11 @@ pub fn router(st: Arc<AppState>) -> Router {
         // correct CORS headers. Also `Authorization` must be explicitly included besides `*`.
         .layer(
             tower_http::cors::CorsLayer::permissive()
-                .allow_headers([header::HeaderName::from_static("*"), header::AUTHORIZATION]),
+                .allow_headers([HeaderName::from_static("*"), header::AUTHORIZATION])
+                .expose_headers([
+                    HeaderName::from_static(X_BLAH_NONCE),
+                    HeaderName::from_static(X_BLAH_DIFFICULTY),
+                ]),
         )
         .with_state(st)
 }

@@ -107,6 +107,7 @@ impl State {
             } else {
                 OsRng.next_u32()
             };
+            n.update_period = cur_period;
             n.nonce = OsRng.next_u32();
             [n.nonce, n.prev_nonce]
         }
@@ -353,7 +354,7 @@ fn validate_id_desc(
             }
             Ok(())
         })()
-        .with_context(|| format!("in act_key {} {}", i, kdesc.act_key))?;
+        .map_err(|err| anyhow!("invalid act_key[{}] {}: {}", i, kdesc.act_key, err))?;
     }
 
     ensure!(profile_signed, "profile is not signed by valid act_keys");
