@@ -288,9 +288,11 @@ dependencies = [
  "clap",
  "ed25519-dalek",
  "hex",
+ "humantime",
  "rand",
  "reqwest",
  "rusqlite",
+ "serde_json",
  "tokio",
 ]
 

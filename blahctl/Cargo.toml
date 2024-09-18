@@ -8,9 +8,11 @@ anyhow = "1"
 clap = { version = "4", features = ["derive"] }
 ed25519-dalek = { version = "2", features = ["pkcs8", "pem", "rand_core"] }
 hex = "0.4"
+humantime = "2"
 rand = "0.8"
 reqwest = { version = "0.12", features = ["json"] }
 rusqlite = "0.32"
+serde_json = "1"
 tokio = { version = "1", features = ["rt", "macros"] }
 
 blah-types = { path = "../blah-types", features = ["rusqlite"] }

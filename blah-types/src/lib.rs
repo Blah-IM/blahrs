@@ -1,4 +1,5 @@
 use std::fmt;
+use std::str::FromStr;
 use std::time::SystemTime;
 
 use bitflags_serde_shim::impl_serde_for_bitflags;
@@ -91,6 +92,14 @@ pub struct UserKey {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct PubKey(#[serde(with = "hex::serde")] pub [u8; PUBLIC_KEY_LENGTH]);
+
+impl FromStr for PubKey {
+    type Err = hex::FromHexError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        hex::FromHex::from_hex(s).map(Self)
+    }
+}
 
 impl fmt::Display for PubKey {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {

@@ -1,16 +1,18 @@
-use std::io::Write;
+use std::fs;
 use std::path::{Path, PathBuf};
-use std::{fs, io};
+use std::time::SystemTime;
 
-use anyhow::{Context, Result};
+use anyhow::{ensure, Context, Result};
 use blah_types::{
     bitflags, get_timestamp, ChatPayload, CreateGroup, CreateRoomPayload, Id, PubKey, RichText,
-    RoomAttrs, ServerPermission, Signed,
+    RoomAttrs, ServerPermission, Signed, UserActKeyDesc, UserIdentityDesc, UserProfile,
 };
 use ed25519_dalek::pkcs8::spki::der::pem::LineEnding;
-use ed25519_dalek::pkcs8::{DecodePrivateKey, DecodePublicKey, EncodePrivateKey, EncodePublicKey};
+use ed25519_dalek::pkcs8::{DecodePrivateKey, DecodePublicKey, EncodePrivateKey};
 use ed25519_dalek::{SigningKey, VerifyingKey, PUBLIC_KEY_LENGTH};
+use humantime::Duration;
 use rand::rngs::OsRng;
+use rand::thread_rng;
 use reqwest::Url;
 use rusqlite::{named_params, Connection};
 use tokio::runtime::Runtime;
@@ -28,11 +30,14 @@ struct Cli {
 
 #[derive(Debug, clap::Subcommand)]
 enum Command {
-    /// Generate a keypair.
-    GenerateKey {
-        /// The output path to store secret key.
-        #[arg(long, short)]
-        output: PathBuf,
+    /// Identity management.
+    Identity {
+        /// The identity description JSON file to write or modify.
+        #[arg(long, short = 'f')]
+        desc_file: PathBuf,
+
+        #[command(subcommand)]
+        command: IdCommand,
     },
     /// Database manipulation.
     Database {
@@ -51,6 +56,43 @@ enum Command {
 
         #[command(subcommand)]
         command: ApiCommand,
+    },
+}
+
+#[derive(Debug, clap::Subcommand)]
+enum IdCommand {
+    /// Generate a new identity keypair.
+    Generate {
+        /// The output path to save the generated signing (private) key.
+        /// Keep it secret and safe!
+        #[arg(long)]
+        id_key_file: PathBuf,
+
+        /// The URL where the identity description is hosted on.
+        ///
+        /// It must be a domain with top-level path `/`. It should have HTTPS schema.
+        /// The identity description file should be available at
+        /// `<id_url>/.well-known/blah/identity.json`.
+        #[arg(long)]
+        id_url: Url,
+    },
+    /// Add an action subkey to an existing identity description.
+    AddActKey {
+        /// The identity signing (private) key to sign with.
+        #[arg(long)]
+        id_key_file: PathBuf,
+
+        /// The verifying (public) key of the action subkey to add.
+        #[arg(long)]
+        act_key: PubKey,
+
+        /// The valid duration for the new subkey, starting from now.
+        #[arg(long)]
+        expire: Duration,
+
+        /// Comment for the new subkey.
+        #[arg(long)]
+        comment: Option<String>,
     },
 }
 
@@ -148,12 +190,7 @@ fn main() -> Result<()> {
     let cli = <Cli as clap::Parser>::parse();
 
     match cli.command {
-        Command::GenerateKey { output } => {
-            let privkey = SigningKey::generate(&mut OsRng);
-            let pubkey_doc = privkey.verifying_key().to_public_key_pem(LineEnding::LF)?;
-            privkey.write_pkcs8_pem_file(&output, LineEnding::LF)?;
-            io::stdout().write_all(pubkey_doc.as_bytes())?;
-        }
+        Command::Identity { desc_file, command } => main_id(desc_file, command)?,
         Command::Database { database, command } => {
             use rusqlite::OpenFlags;
 
@@ -177,6 +214,86 @@ fn build_rt() -> Result<Runtime> {
         .enable_all()
         .build()
         .context("failed to initialize tokio runtime")
+}
+
+fn main_id(desc_file: PathBuf, cmd: IdCommand) -> Result<()> {
+    match cmd {
+        IdCommand::Generate {
+            id_key_file,
+            id_url,
+        } => {
+            let rng = &mut thread_rng();
+            let id_key_priv = SigningKey::generate(rng);
+            let id_key = PubKey(id_key_priv.verifying_key().to_bytes());
+
+            let act_key_desc = UserActKeyDesc {
+                act_key: id_key.clone(),
+                expire_time: i64::MAX as _,
+                comment: "id_key".into(),
+            };
+            let act_key_desc =
+                Signed::sign(&id_key, &id_key_priv, get_timestamp(), rng, act_key_desc)?;
+            let profile = UserProfile {
+                preferred_chat_server_urls: Vec::new(),
+                id_urls: vec![id_url],
+            };
+            let profile = Signed::sign(&id_key, &id_key_priv, get_timestamp(), rng, profile)?;
+            let id_desc = UserIdentityDesc {
+                id_key,
+                act_keys: vec![act_key_desc],
+                profile,
+            };
+            let id_desc_str = serde_json::to_string_pretty(&id_desc).unwrap();
+
+            id_key_priv
+                .write_pkcs8_pem_file(&id_key_file, LineEnding::LF)
+                .context("failed to save private key")?;
+            fs::write(desc_file, &id_desc_str).context("failed to save identity description")?;
+        }
+        IdCommand::AddActKey {
+            id_key_file,
+            act_key,
+            expire,
+            comment,
+        } => {
+            let id_desc = fs::read_to_string(&desc_file).context("failed to open desc_file")?;
+            let mut id_desc = serde_json::from_str::<UserIdentityDesc>(&id_desc)
+                .context("failed to parse desc_file")?;
+            let id_key_priv = load_signing_key(&id_key_file)?;
+            let id_key = PubKey(id_key_priv.verifying_key().to_bytes());
+            ensure!(id_key == id_desc.id_key, "id_key mismatch with key file");
+            let exists = id_desc
+                .act_keys
+                .iter()
+                .any(|kdesc| kdesc.signee.payload.act_key == act_key);
+            ensure!(!exists, "duplicated act_key");
+
+            let expire_time: i64 = SystemTime::now()
+                .checked_add(*expire)
+                .and_then(|time| {
+                    time.duration_since(SystemTime::UNIX_EPOCH)
+                        .ok()?
+                        .as_secs()
+                        .try_into()
+                        .ok()
+                })
+                .context("invalid expire time")?;
+
+            let rng = &mut thread_rng();
+            let act_key_desc = UserActKeyDesc {
+                act_key,
+                expire_time: expire_time as _,
+                comment: comment.unwrap_or_default(),
+            };
+            let act_key_desc =
+                Signed::sign(&id_key, &id_key_priv, get_timestamp(), rng, act_key_desc)?;
+            id_desc.act_keys.push(act_key_desc);
+
+            let id_desc_str = serde_json::to_string_pretty(&id_desc).unwrap();
+            fs::write(desc_file, &id_desc_str).context("failed to save identity description")?;
+        }
+    }
+    Ok(())
 }
 
 fn main_db(conn: Connection, command: DbCommand) -> Result<()> {
