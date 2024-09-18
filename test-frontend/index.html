@@ -50,8 +50,10 @@
     </div>
     <div id="input-area">
       <div>
-        <label for="user-pubkey">user pubkey:</label>
-        <input type="text" id="user-pubkey" placeholder="-" readonly />
+        <label for="id-pubkey">id_pubkey:</label>
+        <input type="text" id="id-pubkey" placeholder="-" />
+        <label for="act-pubkey">act_pubkey:</label>
+        <input type="text" id="act-pubkey" placeholder="-" readonly />
         <button id="regen-key">regenerate</button>
       </div>
       <div>
@@ -63,6 +65,7 @@
             pattern="https://.*"
             required
             />
+        <button id="register">register</button>
       </div>
       <div>
         <label for="rooms">joined rooms:</label>

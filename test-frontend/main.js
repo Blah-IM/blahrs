@@ -1,5 +1,6 @@
 const msgFlow = document.querySelector('#msg-flow');
-const userPubkeyDisplay = document.querySelector('#user-pubkey');
+const idPubkeyInput = document.querySelector('#id-pubkey');
+const actPubkeyDisplay = document.querySelector('#act-pubkey');
 const serverUrlInput = document.querySelector('#server-url');
 const roomsInput = document.querySelector('#rooms');
 const joinNewRoomInput = document.querySelector('#join-new-room');
@@ -22,8 +23,16 @@ function hexToBuf(hex) {
     return new Uint8Array(hex.match(/[\da-f]{2}/gi).map(m => parseInt(m, 16)))
 }
 
-async function getUserPubkey() {
-    if (keypair === null) throw new Error('no userkey');
+function getIdPubkey() {
+    const s = idPubkeyInput.value.trim();
+    if (!s.match(/^[a-zA-Z0-9]{64}$/)) {
+        throw new Error(`invalid id_key, please re-enter: ${s}`);
+    }
+    return s;
+}
+
+async function getActPubkey() {
+    if (keypair === null) throw new Error('no actkey');
     return bufToHex(await crypto.subtle.exportKey('raw', keypair.publicKey));
 }
 
@@ -80,9 +89,11 @@ async function generateKeypair() {
             `,
             true
         );
+        return;
     }
 
     log('keypair generated');
+    actPubkeyDisplay.value = await getActPubkey();
     document.querySelectorAll('input, button, select').forEach((el) => el.disabled = false);
 
     try {
@@ -94,6 +105,37 @@ async function generateKeypair() {
     } catch (e) {
         console.error(e);
         log('failed to store keypair into localStorage');
+    }
+}
+
+async function register() {
+    function norm(url) {
+        return String(url).endsWith('/') ? url : url + '/';
+    }
+
+    try {
+        const idUrl = prompt('id_url:', defaultConfig.id_url || '');
+        if (idUrl === null) return;
+
+        const getResp = await fetch(`${serverUrl}/user/me`, {
+            cache: 'no-store'
+        })
+        console.log(getResp.headers);
+        const challenge = getResp.headers.get('x-blah-nonce');
+        if (challenge === null) throw new Error('cannot get challenge nonce');
+
+        const postResp = await signAndPost(`${serverUrl}/user/me`, {
+            // sorted fields.
+            challenge_nonce: parseInt(challenge),
+            id_key: getIdPubkey(),
+            id_url: norm(idUrl),
+            server_url: norm(serverUrl),
+            typ: 'user_register',
+        })
+        if (!postResp.ok) throw new Error(`status ${getResp.status}: ${(await getResp.json()).error.message}`);
+        log('registered')
+    } catch (err) {
+        log(`failed to register: ${err}`)
     }
 }
 
@@ -304,7 +346,7 @@ async function joinRoom(rid) {
             permission: 1, // POST_CHAT
             room: rid,
             typ: 'add_member',
-            user: await getUserPubkey(),
+            user: await getActPubkey(),
         });
         log('joined room');
         await loadRoomList(false)
@@ -322,7 +364,7 @@ async function leaveRoom() {
         await signAndPost(`${serverUrl}/room/${curRoom}/admin`, {
             room: curRoom,
             typ: 'remove_member',
-            user: await getUserPubkey(),
+            user: await getActPubkey(),
         });
         log('left room');
         await loadRoomList(true);
@@ -351,17 +393,20 @@ async function signAndPost(url, data) {
 }
 
 async function signData(payload) {
-    const userKey = await getUserPubkey();
+    const userKey = await getActPubkey();
     const nonceBuf = new Uint32Array(1);
     crypto.getRandomValues(nonceBuf);
     const timestamp = (Number(new Date()) / 1000) | 0;
     const signee = {
+        // sorted fields.
+        act_key: userKey,
+        id_key: getIdPubkey(),
         nonce: nonceBuf[0],
         payload,
         timestamp,
-        user: userKey,
     };
 
+    console.log(JSON.stringify(signee));
     const signeeBytes = (new TextEncoder()).encode(JSON.stringify(signee));
     const sig = await crypto.subtle.sign('Ed25519', keypair.privateKey, signeeBytes);
 
@@ -421,7 +466,10 @@ window.onload = async (_) => {
         await generateKeypair();
     }
     if (keypair !== null) {
-        userPubkeyDisplay.value = await getUserPubkey();
+        actPubkeyDisplay.value = await getActPubkey();
+    }
+    if (idPubkeyInput.value === '' && defaultConfig.id_key) {
+        idPubkeyInput.value = defaultConfig.id_key;
     }
     if (serverUrlInput.value === '' && defaultConfig.server_url) {
         serverUrlInput.value = defaultConfig.server_url;
@@ -444,6 +492,7 @@ function onButtonClick(selector, handler) {
 }
 onButtonClick('#leave-room', leaveRoom);
 onButtonClick('#regen-key', generateKeypair);
+onButtonClick('#register', register);
 onButtonClick('#refresh-rooms', async () => await loadRoomList(true));
 onButtonClick('#mark-seen', markSeen);
 
