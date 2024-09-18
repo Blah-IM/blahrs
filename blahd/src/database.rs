@@ -131,4 +131,15 @@ impl ConnectionExt for Connection {}
 fn init_sql_valid() {
     let conn = Connection::open_in_memory().unwrap();
     conn.execute_batch(INIT_SQL).unwrap();
+
+    // Instantiate view to check syntax and availability of `unixepoch()`.
+    // It requires sqlite >= 3.38.0 (2022-02-22) which is not available by default on GitHub CI.
+    let ret = conn
+        .query_row(
+            "SELECT COUNT(*) FROM `valid_user_act_key`",
+            params![],
+            |row| row.get::<_, i64>(0),
+        )
+        .unwrap();
+    assert_eq!(ret, 0);
 }

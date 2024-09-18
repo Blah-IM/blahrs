@@ -39,14 +39,19 @@ jobs:
 
   test:
     strategy:
+      fail-fast: false
       matrix:
         rust: [stable, beta]
     name: Test ${{ matrix.rust }}
-    runs-on: ubuntu-latest
+    # Need libsqlite3-dev >= 3.38.0 (2022-02-22)
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Install sqlite
+        run: sudo apt-get install --no-install-recommends -y libsqlite3-dev
 
       - name: Disable high-priority rust-toolchain.toml
         run: rm rust-toolchain.toml
@@ -67,7 +72,11 @@ jobs:
         run: cargo build --workspace --all-targets
 
       - name: Test
-        run: cargo test --workspace --all-targets -- --include-ignored
+        run: cargo test --workspace --all-targets
+
+        # WAIT: Next release of `criterion` for `--include-ignored`.
+      - name: Test ignored
+        run: cargo test --workspace --all-targets -- --ignored
 
   nix-flake:
     name: Flake package
