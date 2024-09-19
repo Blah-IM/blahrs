@@ -144,11 +144,12 @@ async function showChatMsg(chat) {
     try {
         const sortKeys = (obj) =>
             Object.fromEntries(Object.entries(obj).sort((lhs, rhs) => lhs[0] > rhs[0]));
-        const canonicalJson = chat.signee
-        // Just for simplicity. Only this struct is unsorted due to serde implementation.
-        canonicalJson.payload = sortKeys(canonicalJson.payload)
+        let canonicalJson = chat.signee
+        // Just for simplicity.
+        canonicalJson.payload = sortKeys(canonicalJson.payload);
+        canonicalJson = sortKeys(canonicalJson);
         const signeeBytes = (new TextEncoder()).encode(JSON.stringify(canonicalJson));
-        const rawkey = hexToBuf(chat.signee.user);
+        const rawkey = hexToBuf(chat.signee.act_key);
         const senderKey = await crypto.subtle.importKey('raw', rawkey, { name: 'Ed25519' }, true, ['verify']);
         const success = await crypto.subtle.verify('Ed25519', senderKey, hexToBuf(chat.sig), signeeBytes);
         verifyRet = success ? '✔️' : '✖️';
@@ -157,7 +158,8 @@ async function showChatMsg(chat) {
         verifyRet = `✖️ ${e}`;
     }
 
-    const shortUser = chat.signee.user.replace(/^(.{4}).*(.{4})$/, '$1…$2');
+    // TODO: The relationship of id_key and act_key is not verified.
+    const shortUser = chat.signee.id_key.replace(/^(.{4}).*(.{4})$/, '$1…$2');
     const time = new Date(chat.signee.timestamp * 1000).toISOString();
 
     const el = document.createElement('div', {});
@@ -280,9 +282,9 @@ async function connectServer(newServerUrl) {
     ws.onmessage = async (e) => {
         console.log('ws event', e.data);
         const msg = JSON.parse(e.data);
-        if (msg.chat !== undefined) {
-            if (msg.chat.signee.payload.room === curRoom) {
-                await showChatMsg(msg.chat);
+        if (msg.msg !== undefined) {
+            if (msg.msg.signee.payload.room === curRoom) {
+                await showChatMsg(msg.msg);
             } else {
                 console.log('ignore background room msg');
             }
@@ -346,7 +348,7 @@ async function joinRoom(rid) {
             permission: 1, // POST_CHAT
             room: rid,
             typ: 'add_member',
-            user: await getActPubkey(),
+            user: await getIdPubkey(),
         });
         log('joined room');
         await loadRoomList(false)
