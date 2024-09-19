@@ -195,7 +195,8 @@ pub async fn user_register(
         let hash = &hash[..];
         // `difficulty` is u8 so it must be < 256
         let (bytes, bits) = (expect_bits as usize / 8, expect_bits as usize % 8);
-        let ok = hash[..bytes].iter().all(|&b| b == 0) && hash[bytes] >> (8 - bits) == 0;
+        // NB. Shift by 8 would overflow and wrap around for u8. Convert it to u32 first.
+        let ok = hash[..bytes].iter().all(|&b| b == 0) && (hash[bytes] as u32) >> (8 - bits) == 0;
         if !ok {
             return Err(error_response!(
                 StatusCode::BAD_REQUEST,
