@@ -32,22 +32,7 @@ let
     freeformType = toml.type;
 
     # TODO: Auto-generate these options? Now only required options are documented.
-    options = {
-      database.path = mkOption {
-        type = types.path;
-        default = "/var/lib/blahd/db.sqlite";
-      };
-
-      listen.address = mkOption {
-        type = types.str;
-        example = "localhost:8080";
-      };
-
-      server.base_url = mkOption {
-        type = types.str;
-        example = "http://localhost:8080";
-      };
-    };
+    options = { };
   };
 
 in
