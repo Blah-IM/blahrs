@@ -107,6 +107,33 @@ enum IdCommand {
         #[arg(long)]
         comment: Option<String>,
     },
+    /// Update profile of an existing identity description.
+    ///
+    /// The profile will be signed using the primary key.
+    UpdateProfile {
+        /// The identity description JSON file to modify.
+        #[arg(long, short = 'f')]
+        desc_file: PathBuf,
+
+        /// The output path to save the generated signing (private) key.
+        /// Keep it secret and safe!
+        #[arg(long)]
+        id_key_file: PathBuf,
+
+        /// Valid id_url. Multiple URLs are allowed.
+        /// If none are given, the previous URLs are used unchanged.
+        #[arg(long)]
+        id_url: Vec<IdUrl>,
+
+        /// Preferred chat server URLs. Multiple URLs are allowed.
+        /// If none are given, the previous URLs are used unchanged.
+        #[arg(long)]
+        preferred_chat_server_urls: Vec<Url>,
+
+        /// Clear preferred chat servers list.
+        #[arg(long, conflicts_with = "preferred_chat_server_urls")]
+        clear_chat_server_urls: bool,
+    },
 }
 
 #[derive(Debug, clap::Args)]
@@ -340,6 +367,48 @@ fn main_id(cmd: IdCommand) -> Result<()> {
         IdCommand::Validate { id_desc_args } => {
             let id_desc = id_desc_args.load(&build_rt()?)?;
             id_desc.verify(id_desc_args.id_url.as_ref(), get_timestamp())?;
+        }
+        IdCommand::UpdateProfile {
+            desc_file,
+            id_key_file,
+            id_url,
+            preferred_chat_server_urls,
+            clear_chat_server_urls,
+        } => {
+            let id_desc = fs::read_to_string(&desc_file).context("failed to open desc_file")?;
+            let mut id_desc = serde_json::from_str::<UserIdentityDesc>(&id_desc)
+                .context("failed to parse desc_file")?;
+            let id_key_priv = load_signing_key(&id_key_file)?;
+            let id_key = PubKey(id_key_priv.verifying_key().to_bytes());
+            // TODO: Dedup this check.
+            ensure!(id_key == id_desc.id_key, "id_key mismatch with key file");
+            ensure!(
+                id_desc
+                    .act_keys
+                    .iter()
+                    .any(|kdesc| kdesc.signee.payload.act_key == id_key),
+                "id_key must be one of the act_key",
+            );
+
+            let mut profile = id_desc.profile.signee.payload;
+            if !id_url.is_empty() {
+                profile.id_urls = id_url;
+            }
+            if clear_chat_server_urls {
+                profile.preferred_chat_server_urls.clear();
+            } else if !preferred_chat_server_urls.is_empty() {
+                profile.preferred_chat_server_urls = preferred_chat_server_urls;
+            }
+            id_desc.profile = Signed::sign(
+                &id_key,
+                &id_key_priv,
+                get_timestamp(),
+                &mut thread_rng(),
+                profile,
+            )?;
+
+            let id_desc_str = serde_json::to_string_pretty(&id_desc).unwrap();
+            fs::write(desc_file, &id_desc_str).context("failed to save identity description")?;
         }
         IdCommand::AddActKey {
             desc_file,
