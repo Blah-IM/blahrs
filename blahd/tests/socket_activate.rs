@@ -95,8 +95,9 @@ fn socket_activate() {
                 }
 
                 let resp = rt.block_on(async {
+                    let url = format!("http://127.0.0.1:{local_port}/_blah/room?filter=public");
                     let fut = async {
-                        reqwest::get(format!("http://127.0.0.1:{local_port}/room?filter=public"))
+                        reqwest::get(url)
                             .await
                             .unwrap()
                             .error_for_status()

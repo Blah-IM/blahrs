@@ -130,7 +130,11 @@ struct Server {
 
 impl Server {
     fn url(&self, rhs: impl fmt::Display) -> String {
-        format!("http://{}:{}{}", LOCALHOST, self.port, rhs)
+        format!("{}/_blah{}", self.domain(), rhs)
+    }
+
+    fn domain(&self) -> String {
+        format!("http://{}:{}", LOCALHOST, self.port)
     }
 
     fn rng(&self) -> impl DerefMut<Target = impl RngCore> + use<'_> {
@@ -881,7 +885,7 @@ async fn register(server: Server) {
     register_fast(&req)
         .await
         .expect_api_err(StatusCode::BAD_REQUEST, "invalid_server_url");
-    req.server_url = server.url("").parse().unwrap();
+    req.server_url = server.domain().parse().unwrap();
 
     register_fast(&req)
         .await

@@ -129,7 +129,7 @@ impl AppState {
 type ArcState = State<Arc<AppState>>;
 
 pub fn router(st: Arc<AppState>) -> Router {
-    Router::new()
+    let router = Router::new()
         .route("/ws", get(handle_ws))
         .route("/user/me", get(user_get).post(user_register))
         .route("/room", get(room_list))
@@ -153,7 +153,8 @@ pub fn router(st: Arc<AppState>) -> Router {
                     HeaderName::from_static(X_BLAH_DIFFICULTY),
                 ]),
         )
-        .with_state(st)
+        .with_state(st);
+    Router::new().nest("/_blah", router)
 }
 
 type RE<T> = R<T, ApiError>;

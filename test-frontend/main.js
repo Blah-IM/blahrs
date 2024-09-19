@@ -6,7 +6,7 @@ const roomsInput = document.querySelector('#rooms');
 const joinNewRoomInput = document.querySelector('#join-new-room');
 const chatInput = document.querySelector('#chat');
 
-let serverUrl = null;
+let apiUrl = null;
 let curRoom = null;
 let ws = null;
 let keypair = null;
@@ -117,19 +117,19 @@ async function register() {
         const idUrl = prompt('id_url:', defaultConfig.id_url || '');
         if (idUrl === null) return;
 
-        const getResp = await fetch(`${serverUrl}/user/me`, {
+        const getResp = await fetch(`${apiUrl}/user/me`, {
             cache: 'no-store'
         })
         console.log(getResp.headers);
         const challenge = getResp.headers.get('x-blah-nonce');
         if (challenge === null) throw new Error('cannot get challenge nonce');
 
-        const postResp = await signAndPost(`${serverUrl}/user/me`, {
+        const postResp = await signAndPost(`${apiUrl}/user/me`, {
             // sorted fields.
             challenge_nonce: parseInt(challenge),
             id_key: getIdPubkey(),
             id_url: norm(idUrl),
-            server_url: norm(serverUrl),
+            server_url: norm(apiUrl),
             typ: 'user_register',
         })
         if (!postResp.ok) throw new Error(`status ${getResp.status}: ${(await getResp.json()).error.message}`);
@@ -219,7 +219,7 @@ async function enterRoom(rid) {
     roomsInput.value = rid;
 
     genAuthHeader()
-    .then(opts => fetch(`${serverUrl}/room/${rid}`, opts))
+    .then(opts => fetch(`${apiUrl}/room/${rid}`, opts))
     .then(async (resp) => [resp.status, await resp.json()])
     .then(async ([status, json]) => {
         if (status !== 200) throw new Error(`status ${status}: ${json.error.message}`);
@@ -230,7 +230,7 @@ async function enterRoom(rid) {
     });
 
     genAuthHeader()
-    .then(opts => fetch(`${serverUrl}/room/${rid}/msg`, opts))
+    .then(opts => fetch(`${apiUrl}/room/${rid}/msg`, opts))
     .then(async (resp) => { return [resp.status, await resp.json()]; })
     .then(async ([status, json]) => {
         if (status !== 200) throw new Error(`status ${status}: ${json.error.message}`);
@@ -256,7 +256,7 @@ async function connectServer(newServerUrl) {
         log(`invalid url: ${e}`);
         return;
     }
-    serverUrl = newServerUrl;
+    apiUrl = wsUrl.toString() + '_blah';
 
     if (ws !== null) {
         ws.close();
@@ -264,12 +264,12 @@ async function connectServer(newServerUrl) {
 
     log('connecting server');
     wsUrl.protocol = wsUrl.protocol == 'http:' ? 'ws:' : 'wss:';
-    wsUrl.pathname += wsUrl.pathname.endsWith('/') ? 'ws' : '/ws';
+    wsUrl.pathname += '_blah/ws';
     ws = new WebSocket(wsUrl);
     ws.onopen = async (_) => {
         const auth = await signData({ typ: 'auth' });
         await ws.send(auth);
-        log(`listening events on server: ${serverUrl}`);
+        log(`listening events on server: ${newServerUrl}`);
     }
     ws.onclose = (e) => {
         console.error(e);
@@ -310,7 +310,7 @@ async function loadRoomList(autoJoin) {
         targetEl.value = '';
 
         try {
-            const resp = await fetch(`${serverUrl}/room?filter=${filter}`, await genAuthHeader())
+            const resp = await fetch(`${apiUrl}/room?filter=${filter}`, await genAuthHeader())
             const json = await resp.json()
             if (resp.status !== 200) throw new Error(`status ${resp.status}: ${json.error.message}`);
             for (const { rid, title, attrs, last_msg, last_seen_cid } of json.rooms) {
@@ -343,7 +343,7 @@ async function loadRoomList(autoJoin) {
 async function joinRoom(rid) {
     try {
         joinNewRoomInput.disabled = true;
-        await signAndPost(`${serverUrl}/room/${rid}/admin`, {
+        await signAndPost(`${apiUrl}/room/${rid}/admin`, {
             // sorted fields.
             permission: 1, // POST_CHAT
             room: rid,
@@ -363,7 +363,7 @@ async function joinRoom(rid) {
 
 async function leaveRoom() {
     try {
-        await signAndPost(`${serverUrl}/room/${curRoom}/admin`, {
+        await signAndPost(`${apiUrl}/room/${curRoom}/admin`, {
             room: curRoom,
             typ: 'remove_member',
             user: await getActPubkey(),
@@ -428,7 +428,7 @@ async function postChat(text) {
         } else {
             richText = [text];
         }
-        await signAndPost(`${serverUrl}/room/${curRoom}/msg`, {
+        await signAndPost(`${apiUrl}/room/${curRoom}/msg`, {
             // sorted fields.
             rich_text: richText,
             room: curRoom,
@@ -445,7 +445,7 @@ async function postChat(text) {
 
 async function markSeen() {
     try {
-        const resp = await fetch(`${serverUrl}/room/${curRoom}/msg/${lastCid}/seen`, {
+        const resp = await fetch(`${apiUrl}/room/${curRoom}/msg/${lastCid}/seen`, {
             method: 'POST',
             headers: (await genAuthHeader()).headers,
         })
