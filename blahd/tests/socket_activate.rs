@@ -2,7 +2,8 @@ use std::ffi::CString;
 use std::fs::File;
 use std::io::{Seek, Write};
 use std::net::TcpListener;
-use std::os::fd::{AsFd, AsRawFd};
+use std::os::fd::{AsFd, AsRawFd, OwnedFd};
+use std::os::unix::net::UnixListener;
 use std::process::abort;
 use std::ptr::null;
 use std::time::Duration;
@@ -13,6 +14,7 @@ use nix::sys::memfd::{memfd_create, MemFdCreateFlag};
 use nix::sys::signal::{kill, Signal};
 use nix::sys::wait::{waitpid, WaitStatus};
 use nix::unistd::{alarm, dup2, fork, getpid, ForkResult};
+use rstest::rstest;
 use tokio::io::stderr;
 
 const TIMEOUT_SEC: u32 = 1;
@@ -28,10 +30,22 @@ systemd = true
 base_url = "http://example.com"
 "#;
 
-#[test]
-fn socket_activate() {
-    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-    let local_port = listener.local_addr().unwrap().port();
+#[rstest]
+#[case::tcp(false)]
+#[case::unix(true)]
+fn socket_activate(#[case] unix_socket: bool) {
+    let socket_dir;
+    let (local_port, listener) = if unix_socket {
+        socket_dir = tempfile::tempdir().unwrap();
+        let listener = UnixListener::bind(socket_dir.path().join("socket")).unwrap();
+        // Port is unused.
+        (0, OwnedFd::from(listener))
+    } else {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let local_port = listener.local_addr().unwrap().port();
+        (local_port, OwnedFd::from(listener))
+    };
+
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -89,11 +103,11 @@ fn socket_activate() {
             }
         }
         ForkResult::Parent { child } => {
-            {
-                scopeguard::defer! {
-                    let _ = kill(child, Signal::SIGKILL);
-                }
+            let guard = scopeguard::guard((), |()| {
+                let _ = kill(child, Signal::SIGKILL);
+            });
 
+            if !unix_socket {
                 let resp = rt.block_on(async {
                     let url = format!("http://127.0.0.1:{local_port}/_blah/room?filter=public");
                     let fut = async {
@@ -111,13 +125,20 @@ fn socket_activate() {
                         .unwrap()
                 });
                 assert_eq!(resp, r#"{"rooms":[]}"#);
+                // Trigger the killer.
+                drop(guard);
             }
 
             let st = waitpid(child, None).unwrap();
-            assert!(
-                matches!(st, WaitStatus::Signaled(_, Signal::SIGKILL, _)),
-                "unexpected exit status {st:?}",
-            );
+            if unix_socket {
+                // Fail with unsupported error.
+                assert!(matches!(st, WaitStatus::Exited(_, 1)));
+            } else {
+                assert!(
+                    matches!(st, WaitStatus::Signaled(_, Signal::SIGKILL, _)),
+                    "unexpected exit status {st:?}",
+                );
+            }
         }
     }
 }

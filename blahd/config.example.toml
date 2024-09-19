@@ -24,6 +24,7 @@ address = "localhost:8080"
 
 # Use systemd socket activation mechanism to get listener fd from envvars.
 # See also sd_listen_fds(3) and systemd.socket(5).
+# NB. Currently only TCP sockets are supported. UNIX domain socket is TODO.
 #systemd = true
 
 [server]
