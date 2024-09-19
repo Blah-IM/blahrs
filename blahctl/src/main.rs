@@ -19,7 +19,10 @@ use rusqlite::{named_params, Connection};
 use tokio::runtime::Runtime;
 
 /// NB. Sync with docs of [`User::url`].
+// FIXME: Remove old interface.
 const KEY_URL_SUBPATH: &str = "/.well-known/blah/key";
+
+const USER_AGENT: &str = concat!("blahctl/", env!("CARGO_PKG_VERSION"));
 
 /// Control or manage Blah Chat Server.
 #[derive(Debug, clap::Parser)]
@@ -77,6 +80,11 @@ enum IdCommand {
         #[arg(long)]
         id_url: IdUrl,
     },
+    /// Validate identity description from a JSON file or URL.
+    Validate {
+        #[command(flatten)]
+        id_desc_args: IdDescArgs,
+    },
     /// Add an action subkey to an existing identity description.
     AddActKey {
         /// The identity description JSON file to modify.
@@ -99,6 +107,65 @@ enum IdCommand {
         #[arg(long)]
         comment: Option<String>,
     },
+}
+
+#[derive(Debug, clap::Args)]
+#[group(required = true, multiple = false)]
+struct IdDescArgs {
+    /// The identity URL to check.
+    ///
+    /// It should be a HTTPS domain with a top-level path `/`.
+    #[arg(long)]
+    id_url: Option<IdUrl>,
+
+    /// The identity description JSON path to check.
+    #[arg(long, short = 'f')]
+    desc_file: Option<PathBuf>,
+}
+
+impl IdDescArgs {
+    fn load(&self, rt: &Runtime) -> Result<UserIdentityDesc> {
+        const LARGE_BODY_SIZE: usize = 64 << 10; // 64KiB
+
+        let text = if let Some(url) = &self.id_url {
+            if url.scheme() == "http" {
+                // TODO: Verbosity control.
+                eprintln!("warning: id_url has scheme http, which will be rejected by most server");
+            }
+            if url.port().is_some() {
+                eprintln!("warning: id_url has custom port, which will be rejected by most server");
+            }
+
+            let url = url
+                .join(UserIdentityDesc::WELL_KNOWN_PATH)
+                .expect("IdUrl must be a valid base");
+            rt.block_on(async {
+                anyhow::Ok(
+                    build_client()?
+                        .get(url.clone())
+                        .send()
+                        .await?
+                        .error_for_status()?
+                        .text()
+                        .await?,
+                )
+            })
+            .with_context(|| format!("failed to GET {url}"))?
+        } else if let Some(path) = &self.desc_file {
+            fs::read_to_string(path).context("failed to read from desc_file")?
+        } else {
+            unreachable!("enforced by clap");
+        };
+
+        if text.len() > LARGE_BODY_SIZE {
+            eprintln!(
+                "warning: large description size ({}KiB), which will be rejected by most server",
+                LARGE_BODY_SIZE >> 10,
+            );
+        }
+
+        serde_json::from_str(&text).context("failed to parse identity description")
+    }
 }
 
 #[derive(Debug, clap::Subcommand)]
@@ -180,7 +247,13 @@ impl User {
             fs::read_to_string(path).context("failed to read key file")?
         } else if let Some(url) = &self.url {
             let url = url.join(KEY_URL_SUBPATH)?;
-            reqwest::get(url).await?.error_for_status()?.text().await?
+            build_client()?
+                .get(url)
+                .send()
+                .await?
+                .error_for_status()?
+                .text()
+                .await?
         } else {
             unreachable!()
         };
@@ -221,6 +294,14 @@ fn build_rt() -> Result<Runtime> {
         .context("failed to initialize tokio runtime")
 }
 
+fn build_client() -> Result<reqwest::Client> {
+    reqwest::Client::builder()
+        .user_agent(USER_AGENT)
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .context("failed to build HTTP client")
+}
+
 fn main_id(cmd: IdCommand) -> Result<()> {
     match cmd {
         IdCommand::Generate {
@@ -255,6 +336,10 @@ fn main_id(cmd: IdCommand) -> Result<()> {
                 .write_pkcs8_pem_file(&id_key_file, LineEnding::LF)
                 .context("failed to save private key")?;
             fs::write(desc_file, &id_desc_str).context("failed to save identity description")?;
+        }
+        IdCommand::Validate { id_desc_args } => {
+            let id_desc = id_desc_args.load(&build_rt()?)?;
+            id_desc.verify(id_desc_args.id_url.as_ref(), get_timestamp())?;
         }
         IdCommand::AddActKey {
             desc_file,
