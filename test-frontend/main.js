@@ -120,18 +120,18 @@ async function register() {
         const getResp = await fetch(`${apiUrl}/user/me`, {
             cache: 'no-store'
         })
-        console.log(getResp.headers);
-        const challenge = getResp.headers.get('x-blah-nonce');
+        const challenge = parseInt(getResp.headers.get('x-blah-nonce'));
+        const difficulty = parseInt(getResp.headers.get('x-blah-difficulty'));
         if (challenge === null) throw new Error('cannot get challenge nonce');
 
         const postResp = await signAndPost(`${apiUrl}/user/me`, {
             // sorted fields.
-            challenge_nonce: parseInt(challenge),
+            challenge_nonce: challenge,
             id_key: getIdPubkey(),
             id_url: norm(idUrl),
-            server_url: norm(apiUrl),
+            server_url: norm(apiUrl.replace(/\/_blah\/?$/, '')),
             typ: 'user_register',
-        })
+        }, difficulty)
         if (!postResp.ok) throw new Error(`status ${getResp.status}: ${(await getResp.json()).error.message}`);
         log('registered')
     } catch (err) {
@@ -377,8 +377,8 @@ async function leaveRoom() {
 }
 
 
-async function signAndPost(url, data) {
-    const signedPayload = await signData(data);
+async function signAndPost(url, data, difficulty) {
+    const signedPayload = await signData(data, difficulty);
     const resp = await fetch(url, {
         method: 'POST',
         cache: 'no-cache',
@@ -394,7 +394,7 @@ async function signAndPost(url, data) {
     return resp;
 }
 
-async function signData(payload) {
+async function signData(payload, difficulty) {
     const userKey = await getActPubkey();
     const nonceBuf = new Uint32Array(1);
     crypto.getRandomValues(nonceBuf);
@@ -407,9 +407,25 @@ async function signData(payload) {
         payload,
         timestamp,
     };
+    let signeeBytes = (new TextEncoder()).encode(JSON.stringify(signee));
 
-    console.log(JSON.stringify(signee));
-    const signeeBytes = (new TextEncoder()).encode(JSON.stringify(signee));
+    if (difficulty !== undefined && difficulty !== 0) {
+        const zeroBytes = difficulty >> 3;
+        const nonzeroByteMax = 1 << (8 - (difficulty & 7));
+        console.log(`sign with difficulty ${difficulty}, zbytes=${zeroBytes}, nzmax=${nonzeroByteMax}`);
+        let i = 0;
+        let h;
+        for (;; i++) {
+            h = new Uint8Array(await crypto.subtle.digest('SHA-256', signeeBytes));
+            let passed = (h[zeroBytes] < nonzeroByteMax);
+            for (let j = 0; j < zeroBytes; j++) passed &&= (h[j] === 0);
+            if (passed) break;
+            signee.nonce = (signee.nonce + 1) & 0x7FFFFFFF;
+            signeeBytes = (new TextEncoder()).encode(JSON.stringify(signee));
+        }
+        console.log(`challenge complete after ${i} iterations, hash: ${bufToHex(h)}`);
+    }
+
     const sig = await crypto.subtle.sign('Ed25519', keypair.privateKey, signeeBytes);
 
     return JSON.stringify({ sig: bufToHex(sig), signee });
