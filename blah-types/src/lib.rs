@@ -7,6 +7,7 @@ use ed25519_dalek::{
     Signature, SignatureError, Signer, SigningKey, VerifyingKey, PUBLIC_KEY_LENGTH,
     SIGNATURE_LENGTH,
 };
+use identity::IdUrl;
 use rand_core::RngCore;
 use serde::{de, Deserialize, Deserializer, Serialize, Serializer};
 use serde_with::{serde_as, DisplayFromStr};
@@ -15,41 +16,12 @@ use url::Url;
 // Re-export of public dependencies.
 pub use bitflags;
 pub use ed25519_dalek;
+pub use url;
+
+pub mod identity;
 
 pub const X_BLAH_NONCE: &str = "x-blah-nonce";
 pub const X_BLAH_DIFFICULTY: &str = "x-blah-difficulty";
-
-/// User identity description structure.
-// TODO: Revise and shrink duplicates (pubkey fields).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct UserIdentityDesc {
-    /// User primary identity key, only for signing action keys.
-    pub id_key: PubKey,
-    /// User action subkeys, signed by the identity key.
-    pub act_keys: Vec<Signed<UserActKeyDesc>>,
-    /// User profile, signed by any valid action key.
-    pub profile: Signed<UserProfile>,
-}
-
-impl UserIdentityDesc {
-    pub const WELL_KNOWN_PATH: &str = "/.well-known/blah/identity.json";
-}
-
-// TODO: JWS or alike?
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "typ", rename = "user_act_key")]
-pub struct UserActKeyDesc {
-    pub act_key: PubKey,
-    pub expire_time: u64,
-    pub comment: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "typ", rename = "user_profile")]
-pub struct UserProfile {
-    pub preferred_chat_server_urls: Vec<Url>,
-    pub id_urls: Vec<Url>,
-}
 
 /// An opaque server-specific ID for rooms, messages, and etc.
 /// It's currently serialized as a string for JavaScript's convenience.
@@ -177,7 +149,7 @@ impl<T: Serialize> Signed<T> {
 #[serde(tag = "typ", rename = "user_register")]
 pub struct UserRegisterPayload {
     pub server_url: Url,
-    pub id_url: Url,
+    pub id_url: IdUrl,
     pub id_key: PubKey,
     pub challenge_nonce: u32,
 }

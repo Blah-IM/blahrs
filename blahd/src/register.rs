@@ -3,9 +3,9 @@ use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, ensure, Context};
 use axum::http::{HeaderMap, HeaderName, StatusCode};
+use blah_types::identity::{IdUrl, UserIdentityDesc};
 use blah_types::{
-    get_timestamp, PubKey, Signed, UserIdentityDesc, UserRegisterPayload, X_BLAH_DIFFICULTY,
-    X_BLAH_NONCE,
+    get_timestamp, PubKey, Signed, UserRegisterPayload, X_BLAH_DIFFICULTY, X_BLAH_NONCE,
 };
 use http_body_util::BodyExt;
 use parking_lot::Mutex;
@@ -14,16 +14,10 @@ use rand::RngCore;
 use rusqlite::{named_params, params, OptionalExtension};
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
-use url::{Host, Url};
 
 use crate::{ApiError, AppState};
 
 const USER_AGENT: &str = concat!("blahd/", env!("CARGO_PKG_VERSION"));
-
-/// Max domain length is limited by TLS certificate CommonName `ub-common-name`,
-/// which is 64. Adding the schema and port, it should still be below 80.
-/// Ref: https://www.rfc-editor.org/rfc/rfc3280
-const MAX_ID_URL_LEN: usize = 80;
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -38,6 +32,7 @@ pub struct Config {
 
     pub unsafe_allow_id_url_http: bool,
     pub unsafe_allow_id_url_custom_port: bool,
+    pub unsafe_allow_id_url_single_label: bool,
 }
 
 impl Default for Config {
@@ -53,7 +48,29 @@ impl Default for Config {
 
             unsafe_allow_id_url_http: false,
             unsafe_allow_id_url_custom_port: false,
+            unsafe_allow_id_url_single_label: false,
         }
+    }
+}
+
+impl Config {
+    /// Check if the Identity URL is valid under the config.
+    /// This only does additional checking besides rules of [`IdUrl`].
+    fn validate_id_url(&self, url: &IdUrl) -> Result<(), &'static str> {
+        if !self.unsafe_allow_id_url_http && url.scheme() == "http" {
+            return Err("http id_url is not permitted for this server");
+        }
+        if !self.unsafe_allow_id_url_custom_port && url.port().is_some() {
+            return Err("id_url with custom port is not permitted for this server");
+        }
+        let host = url.host_str().expect("checked by IdUrl");
+        if host.starts_with('.') || host.ends_with('.') {
+            return Err("unpermitted id_url with starting or trailing dot");
+        }
+        if !self.unsafe_allow_id_url_single_label && !host.contains('.') {
+            return Err("single-label id_url is not permitted for this server");
+        }
+        Ok(())
     }
 }
 
@@ -131,31 +148,6 @@ impl State {
     }
 }
 
-/// Check if the Identity URL is valid under the config.
-///
-/// We only accept simple HTTPS (and HTTP, if configured) domains. It must not be an IP host and
-/// must not have other parts like username, query, and etc.
-///
-/// Ref: https://docs.rs/url/2.5.2/url/enum.Position.html
-/// ```text
-/// url =
-///    scheme ":"
-///    [ "//" [ username [ ":" password ]? "@" ]? host [ ":" port ]? ]?
-///    path [ "?" query ]? [ "#" fragment ]?
-/// ```
-fn is_id_url_valid(config: &Config, url: &Url) -> bool {
-    use url::Position;
-
-    url.as_str().len() <= MAX_ID_URL_LEN
-        && (url.scheme() == "https" || config.unsafe_allow_id_url_http && url.scheme() == "http")
-        && &url[Position::AfterScheme..Position::BeforeHost] == "://"
-        && url
-            .host()
-            .is_some_and(|host| matches!(host, Host::Domain(_)))
-        && (config.unsafe_allow_id_url_custom_port || url.port().is_none())
-        && &url[Position::BeforePath..] == "/"
-}
-
 pub async fn user_register(
     st: &AppState,
     msg: Signed<UserRegisterPayload>,
@@ -178,11 +170,11 @@ pub async fn user_register(
             "unexpected server url in payload",
         ));
     }
-    if !is_id_url_valid(&st.config.register, &reg.id_url) {
+    if let Err(err) = st.config.register.validate_id_url(&reg.id_url) {
         return Err(error_response!(
             StatusCode::BAD_REQUEST,
             "invalid_id_url",
-            "invalid identity URL",
+            "{err}",
         ));
     }
     if !st.register.nonce().contains(&reg.challenge_nonce) {
@@ -247,7 +239,7 @@ pub async fn user_register(
             return Err(error_response!(
                 StatusCode::UNAUTHORIZED,
                 "fetch_id_description",
-                "failed to fetch identity description from domain {}: {}",
+                "failed to fetch identity description from {}: {}",
                 reg.id_url,
                 err,
             ))
@@ -323,7 +315,7 @@ pub async fn user_register(
 }
 
 fn validate_id_desc(
-    id_url: &Url,
+    id_url: &IdUrl,
     id_key: &PubKey,
     id_desc: &UserIdentityDesc,
     now: u64,
@@ -367,4 +359,31 @@ fn validate_id_desc(
         "id_url list must consists of a single matching id_url",
     );
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reject_unpermitted_id_url() {
+        let mut conf = Config::default();
+        let http_url = "http://example.com".parse().unwrap();
+        conf.validate_id_url(&http_url).unwrap_err();
+        conf.unsafe_allow_id_url_http = true;
+        conf.validate_id_url(&http_url).unwrap();
+
+        let custom_port = "https://example.com:8080".parse().unwrap();
+        conf.validate_id_url(&custom_port).unwrap_err();
+        conf.unsafe_allow_id_url_custom_port = true;
+        conf.validate_id_url(&custom_port).unwrap();
+
+        let single_label = "https://localhost".parse().unwrap();
+        conf.validate_id_url(&single_label).unwrap_err();
+        conf.unsafe_allow_id_url_single_label = true;
+        conf.validate_id_url(&single_label).unwrap();
+
+        conf.validate_id_url(&"https://.".parse().unwrap())
+            .unwrap_err();
+    }
 }

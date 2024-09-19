@@ -3,9 +3,10 @@ use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
 use anyhow::{ensure, Context, Result};
+use blah_types::identity::{IdUrl, UserActKeyDesc, UserIdentityDesc, UserProfile};
 use blah_types::{
     bitflags, get_timestamp, ChatPayload, CreateGroup, CreateRoomPayload, Id, PubKey, RichText,
-    RoomAttrs, ServerPermission, Signed, UserActKeyDesc, UserIdentityDesc, UserProfile,
+    RoomAttrs, ServerPermission, Signed,
 };
 use ed25519_dalek::pkcs8::spki::der::pem::LineEnding;
 use ed25519_dalek::pkcs8::{DecodePrivateKey, DecodePublicKey, EncodePrivateKey};
@@ -74,7 +75,7 @@ enum IdCommand {
         /// The identity description file should be available at
         /// `<id_url>/.well-known/blah/identity.json`.
         #[arg(long)]
-        id_url: Url,
+        id_url: IdUrl,
     },
     /// Add an action subkey to an existing identity description.
     AddActKey {

@@ -9,11 +9,12 @@ use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use axum::http::HeaderMap;
+use blah_types::identity::{IdUrl, UserActKeyDesc, UserIdentityDesc, UserProfile};
 use blah_types::{
     get_timestamp, AuthPayload, ChatPayload, CreateGroup, CreatePeerChat, CreateRoomPayload, Id,
     MemberPermission, PubKey, RichText, RoomAdminOp, RoomAdminPayload, RoomAttrs, RoomMetadata,
-    ServerPermission, Signed, SignedChatMsg, UserActKeyDesc, UserIdentityDesc, UserKey,
-    UserProfile, UserRegisterPayload, WithMsgId, X_BLAH_DIFFICULTY, X_BLAH_NONCE,
+    ServerPermission, Signed, SignedChatMsg, UserKey, UserRegisterPayload, WithMsgId,
+    X_BLAH_DIFFICULTY, X_BLAH_NONCE,
 };
 use blahd::{ApiError, AppState, Database, RoomList, RoomMsgs};
 use ed25519_dalek::SigningKey;
@@ -29,7 +30,6 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tokio::net::TcpListener;
-use url::Url;
 
 // Register API requires a non-IP hostname.
 const LOCALHOST: &str = "localhost";
@@ -48,6 +48,7 @@ difficulty = {REGISTER_DIFFICULTY}
 request_timeout_secs = 1
 unsafe_allow_id_url_http = true
 unsafe_allow_id_url_custom_port = true
+unsafe_allow_id_url_single_label = true
         "#
     )
 };
@@ -856,9 +857,9 @@ async fn register(server: Server) {
 
     let mut req = UserRegisterPayload {
         id_key: CAROL.pubkeys.id_key.clone(),
-        // Fake values.
-        server_url: "http://invalid.example.com".parse().unwrap(),
-        id_url: "file:///etc/passwd".parse().unwrap(),
+        // Invalid values.
+        server_url: "http://localhost".parse().unwrap(),
+        id_url: "http://.".parse().unwrap(),
         challenge_nonce: challenge_nonce - 1,
     };
     let register = |req: Signed<UserRegisterPayload>| {
@@ -897,7 +898,9 @@ async fn register(server: Server) {
 
         let listener = TcpListener::bind(format!("{LOCALHOST}:0")).await.unwrap();
         let port = listener.local_addr().unwrap().port();
-        req.id_url = Url::parse(&format!("http://{LOCALHOST}:{port}")).unwrap();
+        req.id_url = format!("http://{LOCALHOST}:{port}")
+            .parse::<IdUrl>()
+            .unwrap();
 
         let router = axum::Router::new()
             .route(
@@ -962,7 +965,7 @@ async fn register(server: Server) {
             (StatusCode::OK, desc.clone())
         }}
     };
-    let sign_profile = |url: Url| {
+    let sign_profile = |url: IdUrl| {
         server.sign(
             &CAROL,
             UserProfile {
@@ -985,7 +988,7 @@ async fn register(server: Server) {
             },
         )
         .unwrap();
-        let profile = sign_profile(req.id_url.join("/mismatch").unwrap());
+        let profile = sign_profile("https://localhost".parse().unwrap());
         UserIdentityDesc {
             id_key: CAROL.pubkeys.id_key.clone(),
             act_keys: vec![act_key],

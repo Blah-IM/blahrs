@@ -282,6 +282,7 @@ dependencies = [
  "serde_jcs",
  "serde_json",
  "serde_with",
+ "thiserror",
  "url",
 ]
 
