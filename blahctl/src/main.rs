@@ -32,10 +32,6 @@ struct Cli {
 enum Command {
     /// Identity management.
     Identity {
-        /// The identity description JSON file to write or modify.
-        #[arg(long, short = 'f')]
-        desc_file: PathBuf,
-
         #[command(subcommand)]
         command: IdCommand,
     },
@@ -63,6 +59,10 @@ enum Command {
 enum IdCommand {
     /// Generate a new identity keypair.
     Generate {
+        /// The identity description JSON file to write.
+        #[arg(long, short = 'f')]
+        desc_file: PathBuf,
+
         /// The output path to save the generated signing (private) key.
         /// Keep it secret and safe!
         #[arg(long)]
@@ -78,6 +78,10 @@ enum IdCommand {
     },
     /// Add an action subkey to an existing identity description.
     AddActKey {
+        /// The identity description JSON file to modify.
+        #[arg(long, short = 'f')]
+        desc_file: PathBuf,
+
         /// The identity signing (private) key to sign with.
         #[arg(long)]
         id_key_file: PathBuf,
@@ -190,7 +194,7 @@ fn main() -> Result<()> {
     let cli = <Cli as clap::Parser>::parse();
 
     match cli.command {
-        Command::Identity { desc_file, command } => main_id(desc_file, command)?,
+        Command::Identity { command } => main_id(command)?,
         Command::Database { database, command } => {
             use rusqlite::OpenFlags;
 
@@ -216,9 +220,10 @@ fn build_rt() -> Result<Runtime> {
         .context("failed to initialize tokio runtime")
 }
 
-fn main_id(desc_file: PathBuf, cmd: IdCommand) -> Result<()> {
+fn main_id(cmd: IdCommand) -> Result<()> {
     match cmd {
         IdCommand::Generate {
+            desc_file,
             id_key_file,
             id_url,
         } => {
@@ -251,6 +256,7 @@ fn main_id(desc_file: PathBuf, cmd: IdCommand) -> Result<()> {
             fs::write(desc_file, &id_desc_str).context("failed to save identity description")?;
         }
         IdCommand::AddActKey {
+            desc_file,
             id_key_file,
             act_key,
             expire,
