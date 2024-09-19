@@ -2,6 +2,7 @@ use core::fmt;
 use std::ops;
 use std::str::FromStr;
 
+use ed25519_dalek::SignatureError;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use url::{Host, Position, Url};
@@ -20,8 +21,67 @@ pub struct UserIdentityDesc {
     pub profile: Signed<UserProfile>,
 }
 
+#[derive(Debug, Error)]
+#[error(transparent)]
+pub struct VerfiyError(#[from] VerifyErrorImpl);
+
+#[derive(Debug, Error)]
+enum VerifyErrorImpl {
+    #[error("profile id_key mismatch")]
+    ProfileIdKeyMismatch,
+    #[error("act_key[{0}] not signed by id_key")]
+    ActKeySigner(usize),
+    #[error("invalid act_key[{0}] signature: {1}")]
+    ActKeySignature(usize, SignatureError),
+    #[error("profile is not signed by any valid act_key")]
+    ProfileSigner,
+    #[error("invalid profile signature: {0}")]
+    ProfileSignature(SignatureError),
+    #[error("id_url is not in the valid list")]
+    MissingIdUrl,
+}
+
 impl UserIdentityDesc {
     pub const WELL_KNOWN_PATH: &str = "/.well-known/blah/identity.json";
+
+    /// Validate signatures of the identity description at given time.
+    pub fn verify(&self, id_url: Option<&IdUrl>, now_timestamp: u64) -> Result<(), VerfiyError> {
+        if self.id_key != self.profile.signee.user.id_key {
+            return Err(VerifyErrorImpl::ProfileIdKeyMismatch.into());
+        }
+
+        let profile_signing_key = &self.profile.signee.user.act_key;
+        let mut profile_signed = false;
+
+        for (i, signed_kdesc) in self.act_keys.iter().enumerate() {
+            let kdesc = &signed_kdesc.signee.payload;
+            // act_key itself is signed by id_key, so both are id_key here.
+            if signed_kdesc.signee.user.id_key != self.id_key
+                || signed_kdesc.signee.user.act_key != self.id_key
+            {
+                return Err(VerifyErrorImpl::ActKeySigner(i).into());
+            }
+            signed_kdesc
+                .verify()
+                .map_err(|err| VerifyErrorImpl::ActKeySignature(i, err))?;
+            if now_timestamp < kdesc.expire_time && *profile_signing_key == kdesc.act_key {
+                profile_signed = true;
+            }
+        }
+
+        if !profile_signed {
+            return Err(VerifyErrorImpl::ProfileSigner.into());
+        }
+        self.profile
+            .verify()
+            .map_err(VerifyErrorImpl::ProfileSignature)?;
+        if let Some(id_url) = id_url {
+            if !self.profile.signee.payload.id_urls.contains(id_url) {
+                return Err(VerifyErrorImpl::MissingIdUrl.into());
+            }
+        }
+        Ok(())
+    }
 }
 
 // TODO: JWS or alike?
