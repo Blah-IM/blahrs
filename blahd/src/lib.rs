@@ -583,8 +583,7 @@ async fn room_msg_post(
     let listeners = st.event.user_listeners.lock();
     let mut cnt = 0usize;
     for uid in members {
-        // FIXME: u64 vs i64.
-        if let Some(tx) = listeners.get(&(uid as u64)) {
+        if let Some(tx) = listeners.get(&uid) {
             if tx.send(chat.clone()).is_ok() {
                 cnt += 1;
             }

@@ -63,7 +63,7 @@ fn de_duration_sec<'de, D: de::Deserializer<'de>>(de: D) -> Result<Duration, D::
 
 #[derive(Debug, Default)]
 pub struct State {
-    pub user_listeners: Mutex<HashMap<u64, UserEventSender>>,
+    pub user_listeners: Mutex<HashMap<i64, UserEventSender>>,
 }
 
 #[derive(Debug)]
@@ -103,7 +103,7 @@ type UserEventSender = broadcast::Sender<Arc<SignedChatMsg>>;
 struct UserEventReceiver {
     rx: BroadcastStream<Arc<SignedChatMsg>>,
     st: Arc<AppState>,
-    uid: u64,
+    uid: i64,
 }
 
 impl Drop for UserEventReceiver {
@@ -147,8 +147,7 @@ pub async fn handle_ws(st: Arc<AppState>, ws: &mut WebSocket) -> Result<Infallib
             .db
             .with_read(|txn| txn.get_user(&auth.signee.user))
             .map_err(|err| anyhow!("{}", err.message))?;
-        // FIXME: Consistency of id's sign.
-        uid as u64
+        uid
     };
 
     tracing::debug!(%uid, "user connected");
