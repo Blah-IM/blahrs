@@ -264,6 +264,26 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiError'
 
+    delete:
+      summary: Delete a room
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Signed-DeleteRoom'
+
+      responses:
+        204:
+          description: Operation completed.
+
+        401:
+          description: Missing or invalid Authorization header.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+
+
   /_blah/room/{rid}/admin:
     post:
       summary: Room management
@@ -711,6 +731,34 @@ components:
                       const: 'create_peer_chat'
                     peer:
                       type: string
+
+    Signed-DeleteRoom:
+      type: object
+      properties:
+        sig:
+          type: string
+        signee:
+          type: object
+          properties:
+            nonce:
+              type: integer
+              format: uint32
+            timestamp:
+              type: integer
+              format: uint64
+            id_key:
+              type: string
+            act_key:
+              type: string
+            payload:
+              type: object
+              properties:
+                typ:
+                  type: string
+                  const: 'delete_room'
+                room:
+                  type: integer
+                  format: in64
 
     Signed-UserRegister:
       type: object

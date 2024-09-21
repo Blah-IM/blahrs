@@ -437,6 +437,12 @@ pub struct CreatePeerChat {
     pub peer: PubKey,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "typ", rename = "delete_room")]
+pub struct DeleteRoomPayload {
+    pub room: Id,
+}
+
 /// A collection of room members, with these invariants:
 /// 1. Sorted by userkeys.
 /// 2. No duplicated users.
@@ -514,9 +520,10 @@ bitflags::bitflags! {
     pub struct MemberPermission: u64 {
         const POST_CHAT = 1 << 0;
         const ADD_MEMBER = 1 << 1;
+        const DELETE_ROOM = 1 << 2;
 
         const MAX_SELF_ADD = Self::POST_CHAT.bits();
-        const MAX_PEER_CHAT = Self::POST_CHAT.bits();
+        const MAX_PEER_CHAT = Self::POST_CHAT.bits() | Self::DELETE_ROOM.bits();
 
         const ALL = !0;
     }

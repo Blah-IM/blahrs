@@ -517,6 +517,18 @@ pub trait TransactionOps {
         Ok(())
     }
 
+    fn delete_room(&self, rid: Id) -> Result<bool> {
+        let deleted = prepare_cached_and_bind!(
+            self.conn(),
+            r"
+            DELETE FROM `room`
+            WHERE `rid` = :rid
+            "
+        )
+        .raw_execute()?;
+        Ok(deleted == 1)
+    }
+
     fn add_room_member(&self, rid: Id, uid: i64, perm: MemberPermission) -> Result<()> {
         let updated = prepare_cached_and_bind!(
             self.conn(),

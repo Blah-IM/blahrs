@@ -11,10 +11,10 @@ use anyhow::Result;
 use axum::http::HeaderMap;
 use blah_types::identity::{IdUrl, UserActKeyDesc, UserIdentityDesc, UserProfile};
 use blah_types::{
-    AuthPayload, ChatPayload, CreateGroup, CreatePeerChat, CreateRoomPayload, Id, MemberPermission,
-    PubKey, RichText, RoomAdminOp, RoomAdminPayload, RoomAttrs, RoomMetadata, ServerPermission,
-    SignExt, Signed, SignedChatMsg, UserKey, UserRegisterPayload, WithMsgId, X_BLAH_DIFFICULTY,
-    X_BLAH_NONCE,
+    AuthPayload, ChatPayload, CreateGroup, CreatePeerChat, CreateRoomPayload, DeleteRoomPayload,
+    Id, MemberPermission, PubKey, RichText, RoomAdminOp, RoomAdminPayload, RoomAttrs, RoomMetadata,
+    ServerPermission, SignExt, Signed, SignedChatMsg, UserKey, UserRegisterPayload, WithMsgId,
+    X_BLAH_DIFFICULTY, X_BLAH_NONCE,
 };
 use blahd::{ApiError, AppState, Database, RoomList, RoomMsgs};
 use ed25519_dalek::SigningKey;
@@ -198,6 +198,31 @@ impl Server {
                 .await?
                 .unwrap())
         }
+    }
+
+    fn create_peer_chat(
+        &self,
+        src: &User,
+        tgt: &User,
+    ) -> impl Future<Output = Result<Id>> + use<'_> {
+        let req = self.sign(
+            src,
+            CreateRoomPayload::PeerChat(CreatePeerChat {
+                peer: tgt.pubkeys.id_key.clone(),
+            }),
+        );
+        async move {
+            Ok(self
+                .request(Method::POST, "/room/create", None, Some(&req))
+                .await?
+                .unwrap())
+        }
+    }
+
+    fn delete_room(&self, rid: Id, user: &User) -> impl Future<Output = Result<()>> + use<'_> {
+        let req = self.sign(user, DeleteRoomPayload { room: rid });
+        self.request::<_, NoContent>(Method::DELETE, &format!("/room/{rid}"), None, Some(req))
+            .map_ok(|None| {})
     }
 
     fn join_room(
@@ -718,28 +743,18 @@ async fn last_seen(server: Server) {
 #[rstest]
 #[tokio::test]
 async fn peer_chat(server: Server) {
-    let create_chat = |src: &User, tgt: &User| {
-        let req = server.sign(
-            src,
-            CreateRoomPayload::PeerChat(CreatePeerChat {
-                peer: tgt.pubkeys.id_key.clone(),
-            }),
-        );
-        server
-            .request::<_, Id>(Method::POST, "/room/create", None, Some(req))
-            .map_ok(|resp| resp.unwrap())
-    };
-
     // Bob disallows peer chat.
-    create_chat(&ALICE, &BOB)
+    server
+        .create_peer_chat(&ALICE, &BOB)
         .await
         .expect_api_err(StatusCode::NOT_FOUND, "peer_user_not_found");
 
     // Alice accepts bob.
-    let rid = create_chat(&BOB, &ALICE).await.unwrap();
+    let rid = server.create_peer_chat(&BOB, &ALICE).await.unwrap();
 
     // Room already exists.
-    create_chat(&BOB, &ALICE)
+    server
+        .create_peer_chat(&BOB, &ALICE)
         .await
         .expect_api_err(StatusCode::CONFLICT, "exists");
 
@@ -787,6 +802,69 @@ async fn peer_chat(server: Server) {
             }
         );
     }
+}
+
+#[rstest]
+#[case::group(false, true)]
+#[case::peer_src(true, false)]
+#[case::peer_tgt(true, true)]
+#[tokio::test]
+async fn delete_room(server: Server, #[case] peer_chat: bool, #[case] alice_delete: bool) {
+    let rid;
+    if peer_chat {
+        rid = server.create_peer_chat(&BOB, &ALICE).await.unwrap()
+    } else {
+        rid = server
+            .create_room(&ALICE, RoomAttrs::PUBLIC_JOINABLE, "public room")
+            .await
+            .unwrap();
+        server
+            .join_room(rid, &BOB, MemberPermission::MAX_SELF_ADD)
+            .await
+            .unwrap();
+    }
+
+    // Invalid rid.
+    server
+        .delete_room(Id::INVALID, &ALICE)
+        .await
+        .expect_api_err(StatusCode::NOT_FOUND, "room_not_found");
+    // Not in the room.
+    server
+        .delete_room(rid, &CAROL)
+        .await
+        .expect_api_err(StatusCode::NOT_FOUND, "room_not_found");
+    if !peer_chat {
+        // No permission.
+        server
+            .delete_room(rid, &BOB)
+            .await
+            .expect_api_err(StatusCode::FORBIDDEN, "permission_denied");
+    }
+
+    // Not deleted yet.
+    server
+        .get::<RoomMetadata>(&format!("/room/{rid}"), Some(&auth(&ALICE)))
+        .await
+        .unwrap();
+
+    // OK, deleted.
+    server
+        .delete_room(rid, if alice_delete { &ALICE } else { &BOB })
+        .await
+        .unwrap();
+
+    // Should be deleted now.
+    server
+        .get::<RoomMetadata>(&format!("/room/{rid}"), Some(&auth(&ALICE)))
+        .await
+        .expect_api_err(StatusCode::NOT_FOUND, "room_not_found");
+
+    // Peer found it deleted and cannot delete it again.
+    server
+        .delete_room(rid, if !alice_delete { &ALICE } else { &BOB })
+        .await
+        .expect_api_err(StatusCode::NOT_FOUND, "room_not_found");
 }
 
 #[rstest]

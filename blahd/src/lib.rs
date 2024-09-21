@@ -11,9 +11,10 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use axum_extra::extract::WithRejection as R;
 use blah_types::{
-    ChatPayload, CreateGroup, CreatePeerChat, CreateRoomPayload, Id, MemberPermission, RoomAdminOp,
-    RoomAdminPayload, RoomAttrs, RoomMetadata, ServerPermission, Signed, SignedChatMsg, UserKey,
-    UserRegisterPayload, WithMsgId, X_BLAH_DIFFICULTY, X_BLAH_NONCE,
+    ChatPayload, CreateGroup, CreatePeerChat, CreateRoomPayload, DeleteRoomPayload, Id,
+    MemberPermission, RoomAdminOp, RoomAdminPayload, RoomAttrs, RoomMetadata, ServerPermission,
+    Signed, SignedChatMsg, UserKey, UserRegisterPayload, WithMsgId, X_BLAH_DIFFICULTY,
+    X_BLAH_NONCE,
 };
 use database::{Transaction, TransactionOps};
 use ed25519_dalek::SIGNATURE_LENGTH;
@@ -133,7 +134,7 @@ pub fn router(st: Arc<AppState>) -> Router {
         .route("/user/me", get(user_get).post(user_register))
         .route("/room", get(room_list))
         .route("/room/create", post(room_create))
-        .route("/room/:rid", get(room_get_metadata))
+        .route("/room/:rid", get(room_get_metadata).delete(room_delete))
         // NB. Sync with `feed_url` and `next_url` generation.
         .route("/room/:rid/feed.json", get(room_get_feed))
         .route("/room/:rid/msg", get(room_msg_list).post(room_msg_post))
@@ -667,10 +668,44 @@ async fn room_join(
 
 async fn room_leave(st: &AppState, rid: Id, user: &UserKey) -> Result<(), ApiError> {
     st.db.with_write(|txn| {
-        // FIXME: Handle peer chat room?
         let (uid, ..) = txn.get_room_member(rid, user)?;
+        let (attrs, _) = txn.get_room_having(rid, RoomAttrs::empty())?;
+        if attrs.contains(RoomAttrs::PEER_CHAT) {
+            return Err(error_response!(
+                StatusCode::BAD_REQUEST,
+                "invalid_operation",
+                "cannot leave a peer chat room without deleting it",
+            ));
+        }
         txn.remove_room_member(rid, uid)?;
         Ok(())
+    })
+}
+
+async fn room_delete(
+    st: ArcState,
+    R(Path(rid), _): RE<Path<Id>>,
+    SignedJson(op): SignedJson<DeleteRoomPayload>,
+) -> Result<StatusCode, ApiError> {
+    if rid != op.signee.payload.room {
+        return Err(error_response!(
+            StatusCode::BAD_REQUEST,
+            "invalid_request",
+            "URI and payload room id mismatch",
+        ));
+    }
+    st.db.with_write(|txn| {
+        // TODO: Should we only shadow delete here?
+        let (_uid, perm, ..) = txn.get_room_member(rid, &op.signee.user)?;
+        if !perm.contains(MemberPermission::DELETE_ROOM) {
+            return Err(error_response!(
+                StatusCode::FORBIDDEN,
+                "permission_denied",
+                "the user does not have permission to delete the room",
+            ));
+        }
+        txn.delete_room(rid)?;
+        Ok(StatusCode::NO_CONTENT)
     })
 }
 
