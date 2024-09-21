@@ -19,6 +19,7 @@ mod tests;
 
 const DEFAULT_DATABASE_PATH: &str = "/var/lib/blahd/db.sqlite";
 const STMT_CACHE_CAPACITY: usize = 24;
+const UNSEEN_CNT_LIMIT: u32 = 999;
 
 static INIT_SQL: &str = include_str!("../schema.sql");
 
@@ -345,7 +346,6 @@ pub trait TransactionOps {
         start_rid: Id,
         page_len: usize,
     ) -> Result<Vec<RoomMetadata>> {
-        // FIXME: Limit `unseen_cnt` counting.
         prepare_cached_and_bind!(
             self.conn(),
             r"
@@ -354,10 +354,13 @@ pub trait TransactionOps {
                 `cid`, `timestamp`, `nonce`, `sig`, `rich_text`,
                 `last_author`.`id_key`, `msg`.`act_key`,
                 `peer_user`.`id_key` AS `peer_id_key`,
-                (SELECT COUNT(*)
+                (SELECT COUNT(*) FROM (
+                    SELECT 1
                     FROM `msg` AS `unseen_msg`
                     WHERE `unseen_msg`.`rid` = `room`.`rid` AND
-                        `last_seen_cid` < `unseen_msg`.`cid`) AS `unseen_cnt`
+                        `last_seen_cid` < `unseen_msg`.`cid`
+                    LIMIT :UNSEEN_CNT_LIMIT
+                )) AS `unseen_cnt`
             FROM `room_member` INDEXED BY `ix_member_room`
             JOIN `room` USING (`rid`)
             LEFT JOIN `msg` USING (`rid`)

@@ -506,7 +506,7 @@ components:
         attrs:
           description: Room attributes bitset, see `RoomAttrs`.
           type: integer
-          format: int64
+          format: int32
         last_msg:
           $ref: '#/components/schemas/WithMsgId-Signed-Chat'
         last_seen_cid:
@@ -517,10 +517,10 @@ components:
             The number of unseen messages. Only available for
             GET `/room?filter=unseen`.
           type: integer
-          format: uint64
+          format: uint32
         member_permission:
           type: integer
-          format: int64
+          format: int32
         peer_user:
           type: string
           description: |
@@ -536,7 +536,7 @@ components:
           type: string
         attrs:
           type: integer
-          format: int64
+          format: int32
 
     RoomMsgs:
       type: object
@@ -644,7 +644,7 @@ components:
                       type: string
                     permission:
                       type: integer
-                      format: uint64
+                      format: int32
                     user:
                       type: string
 

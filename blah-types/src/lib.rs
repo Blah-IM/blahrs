@@ -405,7 +405,7 @@ pub struct RoomMetadata {
     /// `last_msg.cid`.
     /// This may or may not be a precise number.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub unseen_cnt: Option<u64>,
+    pub unseen_cnt: Option<u32>,
     /// The member permission of current user in the room, or `None` if it is not a member.
     /// Only available with authentication.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -508,7 +508,7 @@ pub enum RoomAdminOp {
 bitflags::bitflags! {
     /// TODO: Is this a really all about permission, or is a generic `UserFlags`?
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-    pub struct ServerPermission: u64 {
+    pub struct ServerPermission: i32 {
         const CREATE_ROOM = 1 << 0;
 
         const ACCEPT_PEER_CHAT = 1 << 16;
@@ -517,7 +517,7 @@ bitflags::bitflags! {
     }
 
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-    pub struct MemberPermission: u64 {
+    pub struct MemberPermission: i32 {
         const POST_CHAT = 1 << 0;
         const ADD_MEMBER = 1 << 1;
         const DELETE_ROOM = 1 << 2;
@@ -529,7 +529,7 @@ bitflags::bitflags! {
     }
 
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-    pub struct RoomAttrs: u64 {
+    pub struct RoomAttrs: i32 {
         // NB. Used by schema.
         const PUBLIC_READABLE = 1 << 0;
         const PUBLIC_JOINABLE = 1 << 1;
@@ -597,27 +597,25 @@ mod sql_impl {
         }
     }
 
-    macro_rules! impl_u64_flag {
+    macro_rules! impl_flag_to_from_sql {
         ($($name:ident),*) => {
             $(
                 impl ToSql for $name {
                     fn to_sql(&self) -> Result<ToSqlOutput<'_>> {
-                        // Cast out the sign.
-                        Ok((self.bits() as i64).into())
+                        Ok(self.bits().into())
                     }
                 }
 
                 impl FromSql for $name {
                     fn column_result(value: ValueRef<'_>) -> FromSqlResult<Self> {
-                        // Cast out the sign.
-                        i64::column_result(value).map(|v| $name::from_bits_retain(v as u64))
+                        i32::column_result(value).map($name::from_bits_retain)
                     }
                 }
             )*
         };
     }
 
-    impl_u64_flag!(ServerPermission, MemberPermission, RoomAttrs);
+    impl_flag_to_from_sql!(ServerPermission, MemberPermission, RoomAttrs);
 }
 
 #[cfg(test)]
