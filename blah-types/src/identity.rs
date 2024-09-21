@@ -23,7 +23,7 @@ pub struct UserIdentityDesc {
 
 #[derive(Debug, Error)]
 #[error(transparent)]
-pub struct VerfiyError(#[from] VerifyErrorImpl);
+pub struct VerifyError(#[from] VerifyErrorImpl);
 
 #[derive(Debug, Error)]
 enum VerifyErrorImpl {
@@ -45,7 +45,7 @@ impl UserIdentityDesc {
     pub const WELL_KNOWN_PATH: &str = "/.well-known/blah/identity.json";
 
     /// Validate signatures of the identity description at given time.
-    pub fn verify(&self, id_url: Option<&IdUrl>, now_timestamp: u64) -> Result<(), VerfiyError> {
+    pub fn verify(&self, id_url: Option<&IdUrl>, now_timestamp: u64) -> Result<(), VerifyError> {
         if self.id_key != self.profile.signee.user.id_key {
             return Err(VerifyErrorImpl::ProfileIdKeyMismatch.into());
         }
