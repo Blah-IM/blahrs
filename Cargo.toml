@@ -15,5 +15,8 @@ print_stdout = "warn"
 todo = "warn"
 unwrap_used = "warn"
 
+[profile.dev]
+debug = "line-tables-only"
+
 [profile.bench]
 debug = "line-tables-only"
