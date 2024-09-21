@@ -17,6 +17,7 @@ use crate::AppState;
 ///
 /// Mostly following: <https://learn.microsoft.com/en-us/graph/errors>
 #[derive(Debug, Serialize, Deserialize)]
+#[must_use]
 pub struct ApiError {
     #[serde(skip, default)]
     pub status: StatusCode,

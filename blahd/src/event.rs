@@ -20,7 +20,7 @@ use tokio::sync::broadcast;
 use tokio_stream::wrappers::errors::BroadcastStreamRecvError;
 use tokio_stream::wrappers::BroadcastStream;
 
-use crate::database::ConnectionExt;
+use crate::database::TransactionOps;
 use crate::AppState;
 
 #[derive(Debug, Deserialize)]
@@ -145,8 +145,7 @@ pub async fn handle_ws(st: Arc<AppState>, ws: &mut WebSocket) -> Result<Infallib
 
         let (uid, _) = st
             .db
-            .get()
-            .get_user(&auth.signee.user)
+            .with_read(|txn| txn.get_user(&auth.signee.user))
             .map_err(|err| anyhow!("{}", err.message))?;
         // FIXME: Consistency of id's sign.
         uid as u64

@@ -490,6 +490,7 @@ bitflags::bitflags! {
 
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
     pub struct RoomAttrs: u64 {
+        // NB. Used by schema.
         const PUBLIC_READABLE = 1 << 0;
         const PUBLIC_JOINABLE = 1 << 1;
 

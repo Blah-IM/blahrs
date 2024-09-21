@@ -408,7 +408,7 @@ async fn room_create_get(server: Server, ref mut rng: impl RngCore, #[case] publ
         if public {
             assert_eq!(resp.unwrap(), room_meta);
         } else {
-            resp.expect_api_err(StatusCode::NOT_FOUND, "not_found");
+            resp.expect_api_err(StatusCode::NOT_FOUND, "room_not_found");
         }
     }
 
@@ -473,11 +473,11 @@ async fn room_join_leave(server: Server, ref mut rng: impl RngCore) {
     // Not permitted.
     join(rid_priv, &BOB)
         .await
-        .expect_api_err(StatusCode::NOT_FOUND, "not_found");
+        .expect_api_err(StatusCode::NOT_FOUND, "room_not_found");
     // Not exists.
     join(Id::INVALID, &BOB)
         .await
-        .expect_api_err(StatusCode::NOT_FOUND, "not_found");
+        .expect_api_err(StatusCode::NOT_FOUND, "room_not_found");
     // Overly high permission.
     server
         .join_room(rid_priv, &BOB, MemberPermission::ALL)
@@ -502,15 +502,15 @@ async fn room_join_leave(server: Server, ref mut rng: impl RngCore) {
     // Already left.
     leave(rid_pub, &BOB)
         .await
-        .expect_api_err(StatusCode::NOT_FOUND, "not_found");
+        .expect_api_err(StatusCode::NOT_FOUND, "room_not_found");
     // Unpermitted and not inside.
     leave(rid_priv, &BOB)
         .await
-        .expect_api_err(StatusCode::NOT_FOUND, "not_found");
+        .expect_api_err(StatusCode::NOT_FOUND, "room_not_found");
     // Invalid room.
     leave(Id::INVALID, &BOB)
         .await
-        .expect_api_err(StatusCode::NOT_FOUND, "not_found");
+        .expect_api_err(StatusCode::NOT_FOUND, "room_not_found");
 }
 
 #[rstest]
@@ -563,7 +563,7 @@ async fn room_chat_post_read(server: Server, ref mut rng: impl RngCore) {
     // Not a member.
     post(rid_pub, chat(rid_pub, &BOB, "not a member"))
         .await
-        .expect_api_err(StatusCode::NOT_FOUND, "not_found");
+        .expect_api_err(StatusCode::NOT_FOUND, "room_not_found");
 
     // Is a member but without permission.
     server
@@ -577,7 +577,7 @@ async fn room_chat_post_read(server: Server, ref mut rng: impl RngCore) {
     // Room not exists.
     post(Id::INVALID, chat(Id::INVALID, &ALICE, "not permitted"))
         .await
-        .expect_api_err(StatusCode::NOT_FOUND, "not_found");
+        .expect_api_err(StatusCode::NOT_FOUND, "room_not_found");
 
     //// Msgs listing ////
 
@@ -636,13 +636,13 @@ async fn room_chat_post_read(server: Server, ref mut rng: impl RngCore) {
     server
         .get::<RoomMsgs>(&format!("/room/{rid_priv}/msg"), None)
         .await
-        .expect_api_err(StatusCode::NOT_FOUND, "not_found");
+        .expect_api_err(StatusCode::NOT_FOUND, "room_not_found");
 
     // Not a member.
     server
         .get::<RoomMsgs>(&format!("/room/{rid_priv}/msg"), Some(&auth(&BOB, rng)))
         .await
-        .expect_api_err(StatusCode::NOT_FOUND, "not_found");
+        .expect_api_err(StatusCode::NOT_FOUND, "room_not_found");
 
     // Ok.
     let msgs = server
@@ -758,7 +758,7 @@ async fn peer_chat(server: Server, ref mut rng: impl RngCore) {
     // Bob disallows peer chat.
     create_chat(&ALICE, &BOB)
         .await
-        .expect_api_err(StatusCode::NOT_FOUND, "not_found");
+        .expect_api_err(StatusCode::NOT_FOUND, "peer_user_not_found");
 
     // Alice accepts bob.
     let rid = create_chat(&BOB, &ALICE).await.unwrap();
@@ -777,7 +777,7 @@ async fn peer_chat(server: Server, ref mut rng: impl RngCore) {
     server
         .get::<RoomMetadata>(&format!("/room/{rid}"), None)
         .await
-        .expect_api_err(StatusCode::NOT_FOUND, "not_found");
+        .expect_api_err(StatusCode::NOT_FOUND, "room_not_found");
 
     // Both alice and bob are in the room.
     for (key, peer) in [(&*ALICE, &*BOB), (&*BOB, &*ALICE)] {

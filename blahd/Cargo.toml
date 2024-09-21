@@ -20,7 +20,7 @@ humantime = "2"
 parking_lot = "0.12" # Maybe no better performance, just that we hate poisoning. ¯\_(ツ)_/¯
 rand = "0.8"
 reqwest = "0.12"
-rusqlite = "0.32"
+rusqlite = { version = "0.32", features = ["rusqlite-macros"] }
 rustix = { version = "0.38", features = ["net"] }
 sd-notify = "0.4"
 serde = { version = "1", features = ["derive"] }

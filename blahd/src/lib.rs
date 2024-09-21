@@ -12,15 +12,14 @@ use axum::{Json, Router};
 use axum_extra::extract::WithRejection as R;
 use blah_types::{
     ChatPayload, CreateGroup, CreatePeerChat, CreateRoomPayload, Id, MemberPermission, RoomAdminOp,
-    RoomAdminPayload, RoomAttrs, RoomMetadata, ServerPermission, Signed, SignedChatMsg, Signee,
-    UserKey, UserRegisterPayload, WithMsgId, X_BLAH_DIFFICULTY, X_BLAH_NONCE,
+    RoomAdminPayload, RoomAttrs, RoomMetadata, ServerPermission, Signed, SignedChatMsg, UserKey,
+    UserRegisterPayload, WithMsgId, X_BLAH_DIFFICULTY, X_BLAH_NONCE,
 };
-use database::ConnectionExt;
+use database::{Transaction, TransactionOps};
 use ed25519_dalek::SIGNATURE_LENGTH;
 use id::IdExt;
 use middleware::{Auth, MaybeAuth, ResultExt as _, SignedJson};
 use parking_lot::Mutex;
-use rusqlite::{named_params, params, Connection, OptionalExtension, Row, ToSql};
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_inline_default::serde_inline_default;
 use url::Url;
@@ -188,25 +187,13 @@ async fn user_get(
     let ret = (|| {
         match auth.into_optional()? {
             None => None,
-            Some(user) => st
-                .db
-                .get()
-                .query_row(
-                    "
-                    SELECT 1
-                    FROM `valid_user_act_key`
-                    WHERE (`id_key`, `act_key`) = (?, ?)
-                    ",
-                    params![user.id_key, user.act_key],
-                    |_| Ok(()),
-                )
-                .optional()?,
+            Some(user) => st.db.with_read(|txn| txn.get_user(&user)).ok(),
         }
         .ok_or_else(|| error_response!(StatusCode::NOT_FOUND, "not_found", "user does not exist"))
     })();
 
     match ret {
-        Ok(()) => Ok(StatusCode::NO_CONTENT),
+        Ok(_) => Ok(StatusCode::NO_CONTENT),
         Err(err) => Err((st.register.challenge_headers(), err)),
     }
 }
@@ -235,7 +222,7 @@ struct ListRoomParams {
     top: Option<NonZeroUsize>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Copy, Deserialize)]
 #[serde(rename_all = "snake_case")]
 enum ListRoomFilter {
     /// List all public rooms.
@@ -243,6 +230,7 @@ enum ListRoomFilter {
     /// List joined rooms (authentication required).
     Joined,
     /// List all joined rooms with unseen messages (authentication required).
+    // TODO: Is this really useful, given most user keep messages unread forever?
     Unseen,
 }
 
@@ -259,143 +247,21 @@ async fn room_list(
     let page_len = pagination.effective_page_len(&st);
     let start_rid = pagination.skip_token.unwrap_or(Id::MIN);
 
-    let query = |sql: &str, params: &[(&str, &dyn ToSql)]| -> Result<RoomList, ApiError> {
-        let rooms = st
-            .db
-            .get()
-            .prepare(sql)?
-            .query_map(params, |row| {
-                // TODO: Extract this into a function.
-                let rid = row.get("rid")?;
-                let last_msg = row
-                    .get::<_, Option<Id>>("cid")?
-                    .map(|cid| {
-                        Ok::<_, rusqlite::Error>(WithMsgId {
-                            cid,
-                            msg: SignedChatMsg {
-                                sig: row.get("sig")?,
-                                signee: Signee {
-                                    nonce: row.get("nonce")?,
-                                    timestamp: row.get("timestamp")?,
-                                    user: UserKey {
-                                        act_key: row.get("act_key")?,
-                                        id_key: row.get("id_key")?,
-                                    },
-                                    payload: ChatPayload {
-                                        rich_text: row.get("rich_text")?,
-                                        room: rid,
-                                    },
-                                },
-                            },
-                        })
-                    })
-                    .transpose()?;
-                Ok(RoomMetadata {
-                    rid,
-                    title: row.get("title")?,
-                    attrs: row.get("attrs")?,
-                    last_msg,
-                    last_seen_cid: Some(row.get::<_, Id>("last_seen_cid")?)
-                        .filter(|cid| cid.0 != 0),
-                    unseen_cnt: row.get("unseen_cnt").ok(),
-                    member_permission: row.get("member_perm").ok(),
-                    peer_user: row.get("peer_id_key").ok(),
-                })
-            })?
-            .collect::<Result<Vec<_>, _>>()?;
-        let skip_token =
-            (rooms.len() == page_len).then(|| rooms.last().expect("page must not be empty").rid);
-        Ok(RoomList { rooms, skip_token })
-    };
-
-    match params.filter {
-        ListRoomFilter::Public => query(
-            r"
-            SELECT `rid`, `title`, `attrs`, 0 AS `last_seen_cid`,
-                `cid`, `timestamp`, `nonce`, `sig`, `rich_text`,
-                `last_author`.`id_key`, `msg`.`act_key`
-            FROM `room`
-            LEFT JOIN `msg` USING (`rid`)
-            LEFT JOIN `user` AS `last_author` USING (`uid`)
-            WHERE `rid` > :start_rid AND
-                (`attrs` & :perm) = :perm
-            GROUP BY `rid` HAVING `cid` IS MAX(`cid`)
-            ORDER BY `rid` ASC
-            LIMIT :page_len
-            ",
-            named_params! {
-                ":start_rid": start_rid,
-                ":page_len": page_len,
-                ":perm": RoomAttrs::PUBLIC_READABLE,
-            },
-        ),
+    let rooms = st.db.with_read(|txn| match params.filter {
+        ListRoomFilter::Public => txn.list_public_rooms(start_rid, page_len),
         ListRoomFilter::Joined => {
-            let user = auth?.0;
-            query(
-                r"
-                SELECT
-                    `rid`, `title`, `attrs`, `last_seen_cid`, `room_member`.`permission` AS `member_perm`,
-                    `cid`, `timestamp`, `nonce`, `sig`, `rich_text`,
-                    `last_author`.`id_key`, `msg`.`act_key`,
-                    `peer_user`.`id_key` AS `peer_id_key`
-                FROM `valid_user_act_key` AS `me`
-                JOIN `room_member` USING (`uid`)
-                JOIN `room` USING (`rid`)
-                LEFT JOIN `msg` USING (`rid`)
-                LEFT JOIN `user` AS `last_author` ON (`last_author`.`uid` = `msg`.`uid`)
-                LEFT JOIN `user` AS `peer_user` ON
-                    (`peer_user`.`uid` = `room`.`peer1` + `room`.`peer2` - `me`.`uid`)
-                WHERE (`me`.`id_key`, `me`.`act_key`) = (:id_key, :act_key) AND
-                    `rid` > :start_rid
-                GROUP BY `rid` HAVING `cid` IS MAX(`cid`)
-                ORDER BY `rid` ASC
-                LIMIT :page_len
-                ",
-                named_params! {
-                    ":start_rid": start_rid,
-                    ":page_len": page_len,
-                    ":id_key": user.id_key,
-                    ":act_key": user.act_key,
-                },
-            )
+            let (uid, _) = txn.get_user(&auth?.0)?;
+            txn.list_joined_rooms(uid, start_rid, page_len)
         }
         ListRoomFilter::Unseen => {
-            let user = auth?.0;
-            query(
-                r"
-                SELECT
-                    `rid`, `title`, `attrs`, `last_seen_cid`, `room_member`.`permission` AS `member_perm`,
-                    `cid`, `timestamp`, `nonce`, `sig`, `rich_text`,
-                    `last_author`.`id_key`, `msg`.`act_key`,
-                    `peer_user`.`id_key` AS `peer_id_key`,
-                    (SELECT COUNT(*)
-                        FROM `msg` AS `unseen_msg`
-                        WHERE `unseen_msg`.`rid` = `room`.`rid` AND
-                            `last_seen_cid` < `unseen_msg`.`cid`) AS `unseen_cnt`
-                FROM `valid_user_act_key` AS `me`
-                JOIN `room_member` USING (`uid`)
-                JOIN `room` USING (`rid`)
-                LEFT JOIN `msg` USING (`rid`)
-                LEFT JOIN `user` AS `last_author` ON (`last_author`.`uid` = `msg`.`uid`)
-                LEFT JOIN `user` AS `peer_user` ON
-                    (`peer_user`.`uid` = `room`.`peer1` + `room`.`peer2` - `me`.`uid`)
-                WHERE (`me`.`id_key`, `me`.`act_key`) = (:id_key, :act_key) AND
-                    `rid` > :start_rid AND
-                    `cid` > `last_seen_cid`
-                GROUP BY `rid` HAVING `cid` IS MAX(`cid`)
-                ORDER BY `rid` ASC
-                LIMIT :page_len
-                ",
-                named_params! {
-                    ":start_rid": start_rid,
-                    ":page_len": page_len,
-                    ":id_key": user.id_key,
-                    ":act_key": user.act_key,
-                },
-            )
+            let (uid, _) = txn.get_user(&auth?.0)?;
+            txn.list_unseen_rooms(uid, start_rid, page_len)
         }
-    }
-    .map(Json)
+    })?;
+
+    let skip_token =
+        (rooms.len() == page_len).then(|| rooms.last().expect("page must not be empty").rid);
+    Ok(Json(RoomList { rooms, skip_token }))
 }
 
 async fn room_create(
@@ -423,55 +289,20 @@ async fn room_create_group(
         ));
     }
 
-    let conn = st.db.get();
-    let (uid, _perm) = conn
-        .query_row(
-            r"
-            SELECT `uid`, `permission`
-            FROM `valid_user_act_key`
-            WHERE (`id_key`, `act_key`) = (?, ?)
-            ",
-            params![user.id_key, user.act_key],
-            |row| {
-                Ok((
-                    row.get::<_, i64>("uid")?,
-                    row.get::<_, ServerPermission>("permission")?,
-                ))
-            },
-        )
-        .optional()?
-        .filter(|(_, perm)| perm.contains(ServerPermission::CREATE_ROOM))
-        .ok_or_else(|| {
-            error_response!(
+    let rid = st.db.with_write(|conn| {
+        let (uid, perm) = conn.get_user(user)?;
+        if !perm.contains(ServerPermission::CREATE_ROOM) {
+            return Err(error_response!(
                 StatusCode::FORBIDDEN,
                 "permission_denied",
-                "the user does not exist or does not have permission to create room",
-            )
-        })?;
-
-    let rid = Id::gen();
-    conn.execute(
-        r"
-        INSERT INTO `room` (`rid`, `title`, `attrs`)
-        VALUES (:rid, :title, :attrs)
-        ",
-        named_params! {
-            ":rid": rid,
-            ":title": op.title,
-            ":attrs": op.attrs,
-        },
-    )?;
-    conn.execute(
-        r"
-        INSERT INTO `room_member` (`rid`, `uid`, `permission`)
-        VALUES (:rid, :uid, :perm)
-        ",
-        named_params! {
-            ":rid": rid,
-            ":uid": uid,
-            ":perm": MemberPermission::ALL,
-        },
-    )?;
+                "the user does not have permission to create room",
+            ));
+        }
+        let rid = Id::gen();
+        conn.create_group(rid, &op.title, op.attrs)?;
+        conn.add_room_member(rid, uid, MemberPermission::ALL)?;
+        Ok(rid)
+    })?;
 
     Ok(Json(rid))
 }
@@ -491,72 +322,24 @@ async fn room_create_peer_chat(
     }
 
     // TODO: Access control and throttling.
-
-    let mut conn = st.db.get();
-    let txn = conn.transaction()?;
-    let (src_uid, _) = txn.get_user(src_user)?;
-    let (tgt_uid, _) = txn
-        .query_row(
-            r"
-            SELECT `uid`, `permission`
-            FROM `user`
-            WHERE `id_key` = ?
-            ",
-            params![tgt_user_id_key],
-            |row| Ok((row.get::<_, i64>(0)?, row.get::<_, ServerPermission>(1)?)),
-        )
-        .optional()?
-        .filter(|(_, perm)| perm.contains(ServerPermission::ACCEPT_PEER_CHAT))
-        .ok_or_else(|| {
-            error_response!(
-                StatusCode::NOT_FOUND,
-                "not_found",
-                "peer user does not exist or disallows peer chat",
-            )
-        })?;
-
-    let mut peers = [src_uid, tgt_uid];
-    peers.sort();
-    let rid = Id::gen_peer_chat_rid();
-    let updated = txn.execute(
-        r"
-        INSERT INTO `room` (`rid`, `attrs`, `peer1`, `peer2`)
-        VALUES (:rid, :attrs, :peer1, :peer2)
-        ON CONFLICT (`peer1`, `peer2`) WHERE `rid` < 0 DO NOTHING
-        ",
-        named_params! {
-            ":rid": rid,
-            ":attrs": RoomAttrs::PEER_CHAT,
-            ":peer1": peers[0],
-            ":peer2": peers[1],
-        },
-    )?;
-    if updated == 0 {
-        return Err(error_response!(
-            StatusCode::CONFLICT,
-            "exists",
-            "room already exists"
-        ));
-    }
-
-    {
-        let mut stmt = txn.prepare(
-            r"
-            INSERT INTO `room_member` (`rid`, `uid`, `permission`)
-            VALUES (:rid, :uid, :perm)
-            ",
-        )?;
-        // TODO: Limit permission of the src user?
-        for uid in peers {
-            stmt.execute(named_params! {
-                ":rid": rid,
-                ":uid": uid,
-                ":perm": MemberPermission::MAX_PEER_CHAT,
+    let rid = st.db.with_write(|txn| {
+        let (src_uid, _) = txn.get_user(src_user)?;
+        let (tgt_uid, _) = txn
+            .get_user_by_id_key(&tgt_user_id_key)
+            .ok()
+            .filter(|(_, perm)| perm.contains(ServerPermission::ACCEPT_PEER_CHAT))
+            .ok_or_else(|| {
+                error_response!(
+                    StatusCode::NOT_FOUND,
+                    "peer_user_not_found",
+                    "peer user does not exist or disallows peer chat",
+                )
             })?;
-        }
-    }
+        let rid = Id::gen_peer_chat_rid();
+        txn.create_peer_room_with_members(rid, RoomAttrs::PEER_CHAT, src_uid, tgt_uid)?;
+        Ok(rid)
+    })?;
 
-    txn.commit()?;
     Ok(Json(rid))
 }
 
@@ -598,11 +381,14 @@ async fn room_msg_list(
     R(Query(pagination), _): RE<Query<Pagination>>,
     auth: MaybeAuth,
 ) -> Result<Json<RoomMsgs>, ApiError> {
-    let (msgs, skip_token) = {
-        let conn = st.db.get();
-        get_room_if_readable(&conn, rid, auth.into_optional()?.as_ref(), |_row| Ok(()))?;
-        query_room_msgs(&st, &conn, rid, pagination)?
-    };
+    let (msgs, skip_token) = st.db.with_read(|txn| {
+        if let Some(user) = auth.into_optional()? {
+            txn.get_room_member(rid, &user)?;
+        } else {
+            txn.get_room_having(rid, RoomAttrs::PUBLIC_READABLE)?;
+        }
+        query_room_msgs(&st, txn, rid, pagination)
+    })?;
     Ok(Json(RoomMsgs { msgs, skip_token }))
 }
 
@@ -611,12 +397,16 @@ async fn room_get_metadata(
     R(Path(rid), _): RE<Path<Id>>,
     auth: MaybeAuth,
 ) -> Result<Json<RoomMetadata>, ApiError> {
-    let conn = st.db.get();
-    let (title, attrs) = get_room_if_readable(&conn, rid, auth.into_optional()?.as_ref(), |row| {
-        Ok((
-            row.get::<_, Option<String>>("title")?,
-            row.get::<_, RoomAttrs>("attrs")?,
-        ))
+    let (attrs, title) = st.db.with_read(|txn| {
+        let filter = if auth
+            .into_optional()?
+            .is_some_and(|user| txn.get_room_member(rid, &user).is_ok())
+        {
+            RoomAttrs::empty()
+        } else {
+            RoomAttrs::PUBLIC_READABLE
+        };
+        txn.get_room_having(rid, filter)
     })?;
 
     Ok(Json(RoomMetadata {
@@ -638,12 +428,14 @@ async fn room_get_feed(
     R(Path(rid), _): RE<Path<Id>>,
     R(Query(pagination), _): RE<Query<Pagination>>,
 ) -> Result<impl IntoResponse, ApiError> {
-    let title;
-    let (msgs, skip_token) = {
-        let conn = st.db.get();
-        title = get_room_if_readable(&conn, rid, None, |row| row.get::<_, String>("title"))?;
-        query_room_msgs(&st, &conn, rid, pagination)?
-    };
+    let (title, msgs, skip_token) = st.db.with_read(|txn| {
+        let (attrs, title) = txn.get_room_having(rid, RoomAttrs::PUBLIC_READABLE)?;
+        // Sanity check.
+        assert!(!attrs.contains(RoomAttrs::PEER_CHAT));
+        let title = title.expect("public room must have title");
+        let (msgs, skip_token) = query_room_msgs(&st, txn, rid, pagination)?;
+        Ok((title, msgs, skip_token))
+    })?;
 
     let items = msgs
         .into_iter()
@@ -736,101 +528,23 @@ struct FeedItemExtra {
     sig: [u8; SIGNATURE_LENGTH],
 }
 
-fn get_room_if_readable<T>(
-    conn: &rusqlite::Connection,
-    rid: Id,
-    user: Option<&UserKey>,
-    f: impl FnOnce(&Row<'_>) -> rusqlite::Result<T>,
-) -> Result<T, ApiError> {
-    let (id_key, act_key) = match user {
-        Some(keys) => (Some(&keys.id_key), Some(&keys.act_key)),
-        None => (None, None),
-    };
-
-    conn.query_row(
-        r"
-        SELECT `title`, `attrs`
-        FROM `room`
-        WHERE `rid` = :rid AND
-            ((`attrs` & :perm) = :perm OR
-            EXISTS(SELECT 1
-                FROM `room_member`
-                JOIN `valid_user_act_key` USING (`uid`)
-                WHERE `room_member`.`rid` = `room`.`rid` AND
-                    (`id_key`, `act_key`) = (:id_key, :act_key)))
-        ",
-        named_params! {
-            ":rid": rid,
-            ":perm": RoomAttrs::PUBLIC_READABLE,
-            ":id_key": id_key,
-            ":act_key": act_key,
-        },
-        f,
-    )
-    .optional()?
-    .ok_or_else(|| {
-        error_response!(
-            StatusCode::NOT_FOUND,
-            "not_found",
-            "the room does not exist or the user is not a room member",
-        )
-    })
-}
-
 /// Get room messages with pagination parameters,
 /// return a page of messages and the next `skip_token` if this is not the last page.
 fn query_room_msgs(
     st: &AppState,
-    conn: &Connection,
+    txn: &Transaction<'_>,
     rid: Id,
     pagination: Pagination,
 ) -> Result<(Vec<WithMsgId<SignedChatMsg>>, Option<Id>), ApiError> {
     let page_len = pagination.effective_page_len(st);
-    let mut stmt = conn.prepare(
-        r"
-        SELECT `cid`, `timestamp`, `nonce`, `sig`, `id_key`, `act_key`, `sig`, `rich_text`
-        FROM `msg`
-        JOIN `user` USING (`uid`)
-        WHERE `rid` = :rid AND
-            :after_cid < `cid` AND
-            `cid` < :before_cid
-        ORDER BY `cid` DESC
-        LIMIT :limit
-        ",
+    let msgs = txn.list_room_msgs(
+        rid,
+        pagination.until_token.unwrap_or(Id::MIN),
+        pagination.skip_token.unwrap_or(Id::MAX),
+        page_len,
     )?;
-    let msgs = stmt
-        .query_and_then(
-            named_params! {
-                ":rid": rid,
-                ":after_cid": pagination.until_token.unwrap_or(Id::MIN),
-                ":before_cid": pagination.skip_token.unwrap_or(Id::MAX),
-                ":limit": page_len,
-            },
-            |row| {
-                Ok(WithMsgId {
-                    cid: row.get("cid")?,
-                    msg: SignedChatMsg {
-                        sig: row.get("sig")?,
-                        signee: Signee {
-                            nonce: row.get("nonce")?,
-                            timestamp: row.get("timestamp")?,
-                            user: UserKey {
-                                id_key: row.get("id_key")?,
-                                act_key: row.get("act_key")?,
-                            },
-                            payload: ChatPayload {
-                                room: rid,
-                                rich_text: row.get("rich_text")?,
-                            },
-                        },
-                    },
-                })
-            },
-        )?
-        .collect::<rusqlite::Result<Vec<_>>>()?;
     let skip_token =
         (msgs.len() == page_len).then(|| msgs.last().expect("page must not be empty").cid);
-
     Ok((msgs, skip_token))
 }
 
@@ -847,38 +561,8 @@ async fn room_msg_post(
         ));
     }
 
-    let (cid, txs) = {
-        let conn = st.db.get();
-        let (uid, perm) = conn
-            .query_row(
-                r"
-                SELECT `uid`, `room_member`.`permission`
-                FROM `room_member`
-                JOIN `valid_user_act_key` USING (`uid`)
-                WHERE `rid` = :rid AND
-                    (`id_key`, `act_key`) = (:id_key, :act_key)
-                ",
-                named_params! {
-                    ":rid": rid,
-                    ":id_key": &chat.signee.user.id_key,
-                    ":act_key": &chat.signee.user.act_key,
-                },
-                |row| {
-                    Ok((
-                        row.get::<_, u64>("uid")?,
-                        row.get::<_, MemberPermission>("permission")?,
-                    ))
-                },
-            )
-            .optional()?
-            .ok_or_else(|| {
-                error_response!(
-                    StatusCode::NOT_FOUND,
-                    "not_found",
-                    "the room does not exist or the user is not a room member",
-                )
-            })?;
-
+    let (cid, members) = st.db.with_write(|txn| {
+        let (uid, perm, ..) = txn.get_room_member(rid, &chat.signee.user)?;
         if !perm.contains(MemberPermission::POST_CHAT) {
             return Err(error_response!(
                 StatusCode::FORBIDDEN,
@@ -888,51 +572,25 @@ async fn room_msg_post(
         }
 
         let cid = Id::gen();
-        conn.execute(
-            r"
-            INSERT INTO `msg` (`cid`, `rid`, `uid`, `act_key`, `timestamp`, `nonce`, `sig`, `rich_text`)
-            VALUES (:cid, :rid, :uid, :act_key, :timestamp, :nonce, :sig, :rich_text)
-            ",
-            named_params! {
-                ":cid": cid,
-                ":rid": rid,
-                ":uid": uid,
-                ":act_key": chat.signee.user.act_key,
-                ":timestamp": chat.signee.timestamp,
-                ":nonce": chat.signee.nonce,
-                ":rich_text": &chat.signee.payload.rich_text,
-                ":sig": chat.sig,
-            },
-        )?;
+        txn.add_room_chat_msg(rid, uid, cid, &chat)?;
+        let members = txn.list_room_members(rid)?;
+        Ok((cid, members))
+    })?;
 
-        // FIXME: Optimize this to not traverses over all members.
-        let mut stmt = conn.prepare(
-            r"
-            SELECT `uid`
-            FROM `room_member`
-            WHERE `rid` = :rid
-            ",
-        )?;
-        let listeners = st.event.user_listeners.lock();
-        let txs = stmt
-            .query_map(params![rid], |row| row.get::<_, u64>(0))?
-            .filter_map(|ret| match ret {
-                Ok(uid) => listeners.get(&uid).map(|tx| Ok(tx.clone())),
-                Err(err) => Some(Err(err)),
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-
-        (cid, txs)
-    };
-
-    if !txs.is_empty() {
-        tracing::debug!("broadcasting event to {} clients", txs.len());
-        let chat = Arc::new(chat);
-        for tx in txs {
-            if let Err(err) = tx.send(chat.clone()) {
-                tracing::debug!(%err, "failed to broadcast event");
+    let chat = Arc::new(chat);
+    // FIXME: Optimize this to not traverses over all members.
+    let listeners = st.event.user_listeners.lock();
+    let mut cnt = 0usize;
+    for uid in members {
+        // FIXME: u64 vs i64.
+        if let Some(tx) = listeners.get(&(uid as u64)) {
+            if tx.send(chat.clone()).is_ok() {
+                cnt += 1;
             }
         }
+    }
+    if cnt != 0 {
+        tracing::debug!("broadcasted event to {cnt} clients");
     }
 
     Ok(Json(cid))
@@ -997,124 +655,36 @@ async fn room_join(
     user: &UserKey,
     permission: MemberPermission,
 ) -> Result<(), ApiError> {
-    let mut conn = st.db.get();
-    let txn = conn.transaction()?;
-    let (uid, _) = txn.get_user(user)?;
-    txn.query_row(
-        r"
-        SELECT `attrs`
-        FROM `room`
-        WHERE `rid` = ?
-        ",
-        params![rid],
-        |row| row.get::<_, RoomAttrs>(0),
-    )
-    .optional()?
-    .filter(|attrs| attrs.contains(RoomAttrs::PUBLIC_JOINABLE))
-    .ok_or_else(|| {
-        error_response!(
-            StatusCode::NOT_FOUND,
-            "not_found",
-            "the room does not exist or the user is not allowed to join the room",
-        )
-    })?;
-
-    let updated = txn.execute(
-        r"
-        INSERT INTO `room_member` (`rid`, `uid`, `permission`)
-        SELECT :rid, :uid, :perm
-        ON CONFLICT (`rid`, `uid`) DO NOTHING
-        ",
-        named_params! {
-           ":rid": rid,
-           ":uid": uid,
-           ":perm": permission,
-        },
-    )?;
-    if updated == 0 {
-        return Err(error_response!(
-            StatusCode::CONFLICT,
-            "exists",
-            "the user is already in the room",
-        ));
-    }
-    txn.commit()?;
-    Ok(())
+    st.db.with_write(|txn| {
+        let (uid, _perm) = txn.get_user(user)?;
+        let (attrs, _) = txn.get_room_having(rid, RoomAttrs::PUBLIC_JOINABLE)?;
+        // Sanity check.
+        assert!(!attrs.contains(RoomAttrs::PEER_CHAT));
+        txn.add_room_member(rid, uid, permission)?;
+        Ok(())
+    })
 }
 
 async fn room_leave(st: &AppState, rid: Id, user: &UserKey) -> Result<(), ApiError> {
-    let mut conn = st.db.get();
-    let txn = conn.transaction()?;
-
-    let uid = txn
-        .query_row(
-            r"
-            SELECT `uid`
-            FROM `room_member`
-            JOIN `valid_user_act_key` USING (`uid`)
-            WHERE (`rid`, `id_key`, `act_key`) = (:rid, :id_key, :act_key)
-            ",
-            named_params! {
-                ":rid": rid,
-                ":id_key": user.id_key,
-                ":act_key": user.act_key,
-            },
-            |row| row.get::<_, u64>("uid"),
-        )
-        .optional()?
-        .ok_or_else(|| {
-            error_response!(
-                StatusCode::NOT_FOUND,
-                "not_found",
-                "the room does not exist or user is not a room member",
-            )
-        })?;
-
-    txn.execute(
-        r"
-        DELETE FROM `room_member`
-        WHERE `rid` = :rid AND
-            `uid` = :uid
-        ",
-        named_params! {
-            ":rid": rid,
-            ":uid": uid,
-        },
-    )?;
-
-    txn.commit()?;
-    Ok(())
+    st.db.with_write(|txn| {
+        // FIXME: Handle peer chat room?
+        let (uid, ..) = txn.get_room_member(rid, user)?;
+        txn.remove_room_member(rid, uid)?;
+        Ok(())
+    })
 }
 
 async fn room_msg_mark_seen(
     st: ArcState,
-    R(Path((rid, cid)), _): RE<Path<(Id, u64)>>,
+    R(Path((rid, cid)), _): RE<Path<(Id, i64)>>,
     Auth(user): Auth,
 ) -> Result<StatusCode, ApiError> {
-    let changed = st.db.get().execute(
-        r"
-        UPDATE `room_member`
-        SET `last_seen_cid` = MAX(`last_seen_cid`, :cid)
-        WHERE
-            `rid` = :rid AND
-            `uid` = (SELECT `uid`
-                FROM `valid_user_act_key`
-                WHERE (`id_key`, `act_key`) = (:id_key, :act_key))
-        ",
-        named_params! {
-            ":cid": cid,
-            ":rid": rid,
-            ":id_key": user.id_key,
-            ":act_key": user.act_key,
-        },
-    )?;
-
-    if changed != 1 {
-        return Err(error_response!(
-            StatusCode::NOT_FOUND,
-            "not_found",
-            "the room does not exist or the user is not a room member",
-        ));
-    }
+    st.db.with_write(|txn| {
+        let (uid, _perm, prev_seen_cid) = txn.get_room_member(rid, &user)?;
+        if cid < prev_seen_cid.0 {
+            return Ok(());
+        }
+        txn.mark_room_msg_seen(rid, uid, Id(cid as _))
+    })?;
     Ok(StatusCode::NO_CONTENT)
 }

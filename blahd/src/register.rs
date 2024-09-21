@@ -9,10 +9,10 @@ use http_body_util::BodyExt;
 use parking_lot::Mutex;
 use rand::rngs::OsRng;
 use rand::RngCore;
-use rusqlite::{named_params, params, OptionalExtension};
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 
+use crate::database::TransactionOps;
 use crate::{ApiError, AppState};
 
 const USER_AGENT: &str = concat!("blahd/", env!("CARGO_PKG_VERSION"));
@@ -260,59 +260,8 @@ pub async fn user_register(
     // Now the identity is verified.
 
     let id_desc_json = serde_jcs::to_string(&id_desc).expect("serialization cannot fail");
-
-    let mut conn = st.db.get();
-    let txn = conn.transaction()?;
-    let uid = txn
-        .query_row(
-            r"
-            INSERT INTO `user` (`id_key`, `last_fetch_time`, `id_desc`)
-            VALUES (:id_key, :last_fetch_time, :id_desc)
-            ON CONFLICT (`id_key`) DO UPDATE SET
-                `last_fetch_time` = :last_fetch_time,
-                `id_desc` = :id_desc
-            WHERE `last_fetch_time` < :last_fetch_time
-            RETURNING `uid`
-            ",
-            named_params! {
-                ":id_key": reg.id_key,
-                ":id_desc": id_desc_json,
-                ":last_fetch_time": fetch_time,
-            },
-            |row| row.get::<_, i64>(0),
-        )
-        .optional()?
-        .ok_or_else(|| {
-            error_response!(
-                StatusCode::CONFLICT,
-                "conflict",
-                "racing register, please try again later",
-            )
-        })?;
-    {
-        txn.execute(
-            r"
-            DELETE FROM `user_act_key`
-            WHERE `uid` = ?
-            ",
-            params![uid],
-        )?;
-        let mut stmt = txn.prepare(
-            r"
-            INSERT INTO `user_act_key` (`uid`, `act_key`, `expire_time`)
-            VALUES (:uid, :act_key, :expire_time)
-            ",
-        )?;
-        for kdesc in &id_desc.act_keys {
-            stmt.execute(named_params! {
-                ":uid": uid,
-                ":act_key": kdesc.signee.payload.act_key,
-                // FIXME: Other `u64` that will be stored in database should also be range checked.
-                ":expire_time": kdesc.signee.payload.expire_time.min(i64::MAX as _),
-            })?;
-        }
-    }
-    txn.commit()?;
+    st.db
+        .with_write(|txn| txn.create_user(&id_desc, &id_desc_json, fetch_time))?;
 
     Ok(StatusCode::NO_CONTENT)
 }

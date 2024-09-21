@@ -17,12 +17,6 @@ CREATE TABLE IF NOT EXISTS `user_act_key` (
     PRIMARY KEY (`uid`, `act_key`)
 ) STRICT, WITHOUT ROWID;
 
-CREATE VIEW IF NOT EXISTS `valid_user_act_key` AS
-    SELECT `act_key`, `user`.*
-    FROM `user_act_key`
-    JOIN `user` USING (`uid`)
-    WHERE unixepoch() < `expire_time`;
-
 -- The highest bit of `rid` will be set for peer chat room.
 -- So simply comparing it against 0 can filter them out.
 CREATE TABLE IF NOT EXISTS `room` (
@@ -42,6 +36,10 @@ CREATE TABLE IF NOT EXISTS `room` (
 CREATE UNIQUE INDEX IF NOT EXISTS `ix_peer_chat` ON `room`
     (`peer1`, `peer2`)
     WHERE `rid` < 0;
+
+-- RoomAttrs::PUBLIC_READABLE
+CREATE INDEX IF NOT EXISTS `ix_public_room` ON `room` (`rid`)
+    WHERE `attrs` & 1 != 0;
 
 CREATE TABLE IF NOT EXISTS `room_member` (
     `rid`           INTEGER NOT NULL REFERENCES `room` ON DELETE CASCADE,
@@ -68,3 +66,11 @@ CREATE TABLE IF NOT EXISTS `msg` (
 ) STRICT;
 
 CREATE INDEX IF NOT EXISTS `room_latest_msg` ON `msg` (`rid` ASC, `cid` DESC);
+
+-- Temporary views.
+
+CREATE TEMP VIEW `valid_user_act_key` AS
+    SELECT `act_key`, `user`.*
+    FROM `user_act_key`
+    JOIN `user` USING (`uid`)
+    WHERE unixepoch() < `expire_time`;
