@@ -51,7 +51,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install sqlite
-        run: sudo apt-get install --no-install-recommends -y libsqlite3-dev
+        run: sudo apt-get install --no-install-recommends -y libsqlite3-dev sqlite3
 
       - name: Disable high-priority rust-toolchain.toml
         run: rm rust-toolchain.toml
