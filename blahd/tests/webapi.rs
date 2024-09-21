@@ -738,6 +738,11 @@ async fn last_seen(server: Server) {
         .await
         .unwrap();
     assert_eq!(rooms, RoomList::default());
+
+    // Cannot see a future msg.
+    seen(&ALICE, Id::MAX)
+        .await
+        .expect_api_err(StatusCode::BAD_REQUEST, "invalid_request");
 }
 
 #[rstest]

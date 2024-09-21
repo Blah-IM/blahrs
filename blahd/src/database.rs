@@ -581,7 +581,26 @@ pub trait TransactionOps {
     }
 
     fn mark_room_msg_seen(&self, rid: Id, uid: i64, cid: Id) -> Result<()> {
-        // TODO: Validate `cid`?
+        let max_cid_in_room = prepare_cached_and_bind!(
+            self.conn(),
+            r"
+            SELECT MAX(`cid`)
+            FROM `msg` INDEXED BY `room_latest_msg`
+            WHERE `rid` = :rid
+            "
+        )
+        .raw_query()
+        .next()?
+        .map(|row| row.get(0))
+        .transpose()?
+        .unwrap_or(Id(0));
+        if max_cid_in_room < cid {
+            return Err(error_response!(
+                StatusCode::BAD_REQUEST,
+                "invalid_request",
+                "invalid cid",
+            ));
+        }
         let updated = prepare_cached_and_bind!(
             self.conn(),
             r"
