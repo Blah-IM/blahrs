@@ -1,9 +1,9 @@
-#![expect(clippy::unwrap_used, reason = "FIXME: random false positive")]
-#![expect(clippy::toplevel_ref_arg, reason = "easy to use for fixtures")]
-use std::cell::RefCell;
+#![expect(
+    clippy::unwrap_used,
+    reason = "WAIT: https://github.com/rust-lang/rust-clippy/issues/11119"
+)]
 use std::fmt;
 use std::future::{Future, IntoFuture};
-use std::ops::DerefMut;
 use std::sync::{Arc, LazyLock};
 use std::time::{Duration, Instant};
 
@@ -11,18 +11,16 @@ use anyhow::Result;
 use axum::http::HeaderMap;
 use blah_types::identity::{IdUrl, UserActKeyDesc, UserIdentityDesc, UserProfile};
 use blah_types::{
-    get_timestamp, AuthPayload, ChatPayload, CreateGroup, CreatePeerChat, CreateRoomPayload, Id,
-    MemberPermission, PubKey, RichText, RoomAdminOp, RoomAdminPayload, RoomAttrs, RoomMetadata,
-    ServerPermission, SignExt, Signed, SignedChatMsg, UserKey, UserRegisterPayload, WithMsgId,
-    X_BLAH_DIFFICULTY, X_BLAH_NONCE,
+    AuthPayload, ChatPayload, CreateGroup, CreatePeerChat, CreateRoomPayload, Id, MemberPermission,
+    PubKey, RichText, RoomAdminOp, RoomAdminPayload, RoomAttrs, RoomMetadata, ServerPermission,
+    SignExt, Signed, SignedChatMsg, UserKey, UserRegisterPayload, WithMsgId, X_BLAH_DIFFICULTY,
+    X_BLAH_NONCE,
 };
 use blahd::{ApiError, AppState, Database, RoomList, RoomMsgs};
 use ed25519_dalek::SigningKey;
 use futures_util::future::BoxFuture;
 use futures_util::TryFutureExt;
 use parking_lot::Mutex;
-use rand::rngs::mock::StepRng;
-use rand::RngCore;
 use reqwest::{header, Method, StatusCode};
 use rstest::{fixture, rstest};
 use rusqlite::{params, Connection};
@@ -79,11 +77,6 @@ static ALICE: LazyLock<User> = LazyLock::new(|| User::new(b'A'));
 static BOB: LazyLock<User> = LazyLock::new(|| User::new(b'B'));
 static CAROL: LazyLock<User> = LazyLock::new(|| User::new(b'C'));
 
-#[fixture]
-fn rng() -> impl RngCore {
-    rand::rngs::mock::StepRng::new(42, 1)
-}
-
 #[derive(Debug, Serialize, Deserialize)]
 enum NoContent {}
 
@@ -125,7 +118,6 @@ impl std::error::Error for ApiErrorWithHeaders {}
 struct Server {
     port: u16,
     client: reqwest::Client,
-    rng: RefCell<StepRng>,
 }
 
 impl Server {
@@ -135,10 +127,6 @@ impl Server {
 
     fn domain(&self) -> String {
         format!("http://{}:{}", LOCALHOST, self.port)
-    }
-
-    fn rng(&self) -> impl DerefMut<Target = impl RngCore> + use<'_> {
-        self.rng.borrow_mut()
     }
 
     fn request<Req: Serialize, Resp: DeserializeOwned>(
@@ -188,13 +176,7 @@ impl Server {
     }
 
     fn sign<T: Serialize>(&self, user: &User, msg: T) -> Signed<T> {
-        msg.sign_msg_with(
-            &user.pubkeys.id_key,
-            &user.act_priv,
-            get_timestamp(),
-            &mut *self.rng.borrow_mut(),
-        )
-        .unwrap()
+        msg.sign_msg(&user.pubkeys.id_key, &user.act_priv).unwrap()
     }
 
     fn create_room(
@@ -331,8 +313,7 @@ fn server() -> Server {
 
     tokio::spawn(axum::serve(listener, router).into_future());
     let client = reqwest::ClientBuilder::new().no_proxy().build().unwrap();
-    let rng = StepRng::new(24, 1).into();
-    Server { port, client, rng }
+    Server { port, client }
 }
 
 #[rstest]
@@ -346,9 +327,9 @@ async fn smoke(server: Server) {
     assert_eq!(got, exp);
 }
 
-fn auth(user: &User, rng: &mut impl RngCore) -> String {
+fn auth(user: &User) -> String {
     let msg = AuthPayload {}
-        .sign_msg_with(&user.pubkeys.id_key, &user.act_priv, get_timestamp(), rng)
+        .sign_msg(&user.pubkeys.id_key, &user.act_priv)
         .unwrap();
     serde_json::to_string(&msg).unwrap()
 }
@@ -357,7 +338,7 @@ fn auth(user: &User, rng: &mut impl RngCore) -> String {
 #[case::public(true)]
 #[case::private(false)]
 #[tokio::test]
-async fn room_create_get(server: Server, ref mut rng: impl RngCore, #[case] public: bool) {
+async fn room_create_get(server: Server, #[case] public: bool) {
     let title = "test room";
     let mut room_meta = RoomMetadata {
         rid: Id(0),
@@ -389,13 +370,13 @@ async fn room_create_get(server: Server, ref mut rng: impl RngCore, #[case] publ
 
     // Alice can always access it.
     let got_meta = server
-        .get::<RoomMetadata>(&format!("/room/{rid}"), Some(&auth(&ALICE, rng)))
+        .get::<RoomMetadata>(&format!("/room/{rid}"), Some(&auth(&ALICE)))
         .await
         .unwrap();
     assert_eq!(got_meta, room_meta);
 
     // Bob or public can access it when it is public.
-    for auth in [None, Some(auth(&BOB, rng))] {
+    for auth in [None, Some(auth(&BOB))] {
         let resp = server
             .get::<RoomMetadata>(&format!("/room/{rid}"), auth.as_deref())
             .await;
@@ -432,13 +413,13 @@ async fn room_create_get(server: Server, ref mut rng: impl RngCore, #[case] publ
         .await
         .expect_api_err(StatusCode::UNAUTHORIZED, "unauthorized");
     let got_joined = server
-        .get::<RoomList>("/room?filter=joined", Some(&auth(&ALICE, rng)))
+        .get::<RoomList>("/room?filter=joined", Some(&auth(&ALICE)))
         .await
         .unwrap();
     assert_eq!(got_joined, expect_list(true, Some(MemberPermission::ALL)));
 
     let got_joined = server
-        .get::<RoomList>("/room?filter=joined", Some(&auth(&BOB, rng)))
+        .get::<RoomList>("/room?filter=joined", Some(&auth(&BOB)))
         .await
         .unwrap();
     assert_eq!(got_joined, expect_list(false, None));
@@ -446,7 +427,7 @@ async fn room_create_get(server: Server, ref mut rng: impl RngCore, #[case] publ
 
 #[rstest]
 #[tokio::test]
-async fn room_join_leave(server: Server, ref mut rng: impl RngCore) {
+async fn room_join_leave(server: Server) {
     let rid_pub = server
         .create_room(&ALICE, RoomAttrs::PUBLIC_JOINABLE, "public room")
         .await
@@ -481,7 +462,7 @@ async fn room_join_leave(server: Server, ref mut rng: impl RngCore) {
     // Bob is joined now.
     assert_eq!(
         server
-            .get::<RoomList>("/room?filter=joined", Some(&auth(&BOB, rng)))
+            .get::<RoomList>("/room?filter=joined", Some(&auth(&BOB)))
             .await
             .unwrap()
             .rooms
@@ -509,7 +490,7 @@ async fn room_join_leave(server: Server, ref mut rng: impl RngCore) {
 
 #[rstest]
 #[tokio::test]
-async fn room_chat_post_read(server: Server, ref mut rng: impl RngCore) {
+async fn room_chat_post_read(server: Server) {
     let rid_pub = server
         .create_room(
             &ALICE,
@@ -634,13 +615,13 @@ async fn room_chat_post_read(server: Server, ref mut rng: impl RngCore) {
 
     // Not a member.
     server
-        .get::<RoomMsgs>(&format!("/room/{rid_priv}/msg"), Some(&auth(&BOB, rng)))
+        .get::<RoomMsgs>(&format!("/room/{rid_priv}/msg"), Some(&auth(&BOB)))
         .await
         .expect_api_err(StatusCode::NOT_FOUND, "room_not_found");
 
     // Ok.
     let msgs = server
-        .get::<RoomMsgs>(&format!("/room/{rid_priv}/msg"), Some(&auth(&ALICE, rng)))
+        .get::<RoomMsgs>(&format!("/room/{rid_priv}/msg"), Some(&auth(&ALICE)))
         .await
         .unwrap();
     assert_eq!(msgs, RoomMsgs::default());
@@ -648,7 +629,7 @@ async fn room_chat_post_read(server: Server, ref mut rng: impl RngCore) {
 
 #[rstest]
 #[tokio::test]
-async fn last_seen(server: Server, ref mut rng: impl RngCore) {
+async fn last_seen(server: Server) {
     let title = "public room";
     let attrs = RoomAttrs::PUBLIC_READABLE | RoomAttrs::PUBLIC_JOINABLE;
     let member_perm = MemberPermission::ALL;
@@ -663,7 +644,7 @@ async fn last_seen(server: Server, ref mut rng: impl RngCore) {
 
     // 2 new msgs.
     let rooms = server
-        .get::<RoomList>("/room?filter=unseen", Some(&auth(&ALICE, rng)))
+        .get::<RoomList>("/room?filter=unseen", Some(&auth(&ALICE)))
         .await
         .unwrap();
     assert_eq!(
@@ -687,7 +668,7 @@ async fn last_seen(server: Server, ref mut rng: impl RngCore) {
         server.request::<NoContent, NoContent>(
             Method::POST,
             &format!("/room/{rid}/msg/{cid}/seen"),
-            Some(&auth(user, &mut *server.rng.borrow_mut())),
+            Some(&auth(user)),
             None,
         )
     };
@@ -697,7 +678,7 @@ async fn last_seen(server: Server, ref mut rng: impl RngCore) {
 
     // 1 new msg.
     let rooms = server
-        .get::<RoomList>("/room?filter=unseen", Some(&auth(&ALICE, rng)))
+        .get::<RoomList>("/room?filter=unseen", Some(&auth(&ALICE)))
         .await
         .unwrap();
     assert_eq!(
@@ -720,7 +701,7 @@ async fn last_seen(server: Server, ref mut rng: impl RngCore) {
     // Mark the second one seen. Now there is no new messages.
     seen(&ALICE, alice_chat2.cid).await.unwrap();
     let rooms = server
-        .get::<RoomList>("/room?filter=unseen", Some(&auth(&ALICE, rng)))
+        .get::<RoomList>("/room?filter=unseen", Some(&auth(&ALICE)))
         .await
         .unwrap();
     assert_eq!(rooms, RoomList::default());
@@ -728,7 +709,7 @@ async fn last_seen(server: Server, ref mut rng: impl RngCore) {
     // Marking a seen message seen is a no-op.
     seen(&ALICE, alice_chat2.cid).await.unwrap();
     let rooms = server
-        .get::<RoomList>("/room?filter=unseen", Some(&auth(&ALICE, rng)))
+        .get::<RoomList>("/room?filter=unseen", Some(&auth(&ALICE)))
         .await
         .unwrap();
     assert_eq!(rooms, RoomList::default());
@@ -736,7 +717,7 @@ async fn last_seen(server: Server, ref mut rng: impl RngCore) {
 
 #[rstest]
 #[tokio::test]
-async fn peer_chat(server: Server, ref mut rng: impl RngCore) {
+async fn peer_chat(server: Server) {
     let create_chat = |src: &User, tgt: &User| {
         let req = server.sign(
             src,
@@ -787,7 +768,7 @@ async fn peer_chat(server: Server, ref mut rng: impl RngCore) {
         };
 
         let meta = server
-            .get::<RoomMetadata>(&format!("/room/{rid}"), Some(&auth(key, rng)))
+            .get::<RoomMetadata>(&format!("/room/{rid}"), Some(&auth(key)))
             .await
             .unwrap();
         assert_eq!(meta, expect_meta);
@@ -795,7 +776,7 @@ async fn peer_chat(server: Server, ref mut rng: impl RngCore) {
         expect_meta.member_permission = Some(MemberPermission::MAX_PEER_CHAT);
         expect_meta.peer_user = Some(peer.pubkeys.id_key.clone());
         let rooms = server
-            .get::<RoomList>("/room?filter=joined", Some(&auth(key, rng)))
+            .get::<RoomList>("/room?filter=joined", Some(&auth(key)))
             .await
             .unwrap();
         assert_eq!(
@@ -821,7 +802,7 @@ async fn register(server: Server) {
         .unwrap();
 
     let get_me = |user: Option<&User>| {
-        let auth = user.map(|user| auth(user, &mut *server.rng()));
+        let auth = user.map(auth);
         server
             .request::<(), ()>(Method::GET, "/user/me", auth.as_deref(), None)
             .map_ok(|_| ())
