@@ -13,7 +13,7 @@ use blah_types::identity::{IdUrl, UserActKeyDesc, UserIdentityDesc, UserProfile}
 use blah_types::{
     get_timestamp, AuthPayload, ChatPayload, CreateGroup, CreatePeerChat, CreateRoomPayload, Id,
     MemberPermission, PubKey, RichText, RoomAdminOp, RoomAdminPayload, RoomAttrs, RoomMetadata,
-    ServerPermission, Signed, SignedChatMsg, UserKey, UserRegisterPayload, WithMsgId,
+    ServerPermission, SignExt, Signed, SignedChatMsg, UserKey, UserRegisterPayload, WithMsgId,
     X_BLAH_DIFFICULTY, X_BLAH_NONCE,
 };
 use blahd::{ApiError, AppState, Database, RoomList, RoomMsgs};
@@ -188,12 +188,11 @@ impl Server {
     }
 
     fn sign<T: Serialize>(&self, user: &User, msg: T) -> Signed<T> {
-        Signed::sign(
+        msg.sign_msg_with(
             &user.pubkeys.id_key,
             &user.act_priv,
             get_timestamp(),
             &mut *self.rng.borrow_mut(),
-            msg,
         )
         .unwrap()
     }
@@ -348,14 +347,9 @@ async fn smoke(server: Server) {
 }
 
 fn auth(user: &User, rng: &mut impl RngCore) -> String {
-    let msg = Signed::sign(
-        &user.pubkeys.id_key,
-        &user.act_priv,
-        get_timestamp(),
-        rng,
-        AuthPayload {},
-    )
-    .unwrap();
+    let msg = AuthPayload {}
+        .sign_msg_with(&user.pubkeys.id_key, &user.act_priv, get_timestamp(), rng)
+        .unwrap();
     serde_json::to_string(&msg).unwrap()
 }
 
@@ -980,17 +974,12 @@ async fn register(server: Server) {
     };
     let mut id_desc = {
         // Sign using id_key.
-        let act_key = Signed::sign(
-            &CAROL.pubkeys.id_key,
-            &CAROL.id_priv,
-            get_timestamp(),
-            &mut *server.rng(),
-            UserActKeyDesc {
-                act_key: CAROL.pubkeys.act_key.clone(),
-                expire_time: u64::MAX,
-                comment: "comment".into(),
-            },
-        )
+        let act_key = UserActKeyDesc {
+            act_key: CAROL.pubkeys.act_key.clone(),
+            expire_time: u64::MAX,
+            comment: "comment".into(),
+        }
+        .sign_msg(&CAROL.pubkeys.id_key, &CAROL.id_priv)
         .unwrap();
         let profile = sign_profile("https://localhost".parse().unwrap());
         UserIdentityDesc {

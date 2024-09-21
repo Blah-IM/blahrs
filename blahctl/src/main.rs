@@ -6,13 +6,12 @@ use anyhow::{ensure, Context, Result};
 use blah_types::identity::{IdUrl, UserActKeyDesc, UserIdentityDesc, UserProfile};
 use blah_types::{
     bitflags, get_timestamp, ChatPayload, CreateGroup, CreateRoomPayload, Id, PubKey, RichText,
-    RoomAttrs, ServerPermission, Signed,
+    RoomAttrs, ServerPermission, SignExt,
 };
 use ed25519_dalek::pkcs8::spki::der::pem::LineEnding;
 use ed25519_dalek::pkcs8::{DecodePrivateKey, DecodePublicKey, EncodePrivateKey};
 use ed25519_dalek::{SigningKey, VerifyingKey, PUBLIC_KEY_LENGTH};
 use humantime::Duration;
-use rand::rngs::OsRng;
 use rand::thread_rng;
 use reqwest::Url;
 use rusqlite::{named_params, Connection};
@@ -336,22 +335,22 @@ fn main_id(cmd: IdCommand) -> Result<()> {
             id_key_file,
             id_url,
         } => {
-            let rng = &mut thread_rng();
-            let id_key_priv = SigningKey::generate(rng);
+            let id_key_priv = SigningKey::generate(&mut thread_rng());
             let id_key = PubKey(id_key_priv.verifying_key().to_bytes());
 
             let act_key_desc = UserActKeyDesc {
                 act_key: id_key.clone(),
                 expire_time: i64::MAX as _,
                 comment: "id_key".into(),
-            };
-            let act_key_desc =
-                Signed::sign(&id_key, &id_key_priv, get_timestamp(), rng, act_key_desc)?;
+            }
+            .sign_msg(&id_key, &id_key_priv)
+            .expect("serialization cannot fail");
             let profile = UserProfile {
                 preferred_chat_server_urls: Vec::new(),
                 id_urls: vec![id_url],
-            };
-            let profile = Signed::sign(&id_key, &id_key_priv, get_timestamp(), rng, profile)?;
+            }
+            .sign_msg(&id_key, &id_key_priv)
+            .expect("serialization cannot fail");
             let id_desc = UserIdentityDesc {
                 id_key,
                 act_keys: vec![act_key_desc],
@@ -399,13 +398,9 @@ fn main_id(cmd: IdCommand) -> Result<()> {
             } else if !preferred_chat_server_urls.is_empty() {
                 profile.preferred_chat_server_urls = preferred_chat_server_urls;
             }
-            id_desc.profile = Signed::sign(
-                &id_key,
-                &id_key_priv,
-                get_timestamp(),
-                &mut thread_rng(),
-                profile,
-            )?;
+            id_desc.profile = profile
+                .sign_msg(&id_key, &id_key_priv)
+                .expect("serialization cannot fail");
 
             let id_desc_str = serde_json::to_string_pretty(&id_desc).unwrap();
             fs::write(desc_file, &id_desc_str).context("failed to save identity description")?;
@@ -440,14 +435,13 @@ fn main_id(cmd: IdCommand) -> Result<()> {
                 })
                 .context("invalid expire time")?;
 
-            let rng = &mut thread_rng();
             let act_key_desc = UserActKeyDesc {
                 act_key,
                 expire_time: expire_time as _,
                 comment: comment.unwrap_or_default(),
-            };
-            let act_key_desc =
-                Signed::sign(&id_key, &id_key_priv, get_timestamp(), rng, act_key_desc)?;
+            }
+            .sign_msg(&id_key, &id_key_priv)
+            .expect("serialization cannot fail");
             id_desc.act_keys.push(act_key_desc);
 
             let id_desc_str = serde_json::to_string_pretty(&id_desc).unwrap();
@@ -498,15 +492,10 @@ async fn main_api(api_url: Url, command: ApiCommand) -> Result<()> {
             let payload = CreateRoomPayload::Group(CreateGroup {
                 attrs: attrs.unwrap_or_default(),
                 title,
-            });
+            })
             // FIXME: Same key.
-            let payload = Signed::sign(
-                &PubKey(key.to_bytes()),
-                &key,
-                get_timestamp(),
-                &mut OsRng,
-                payload,
-            )?;
+            .sign_msg(&PubKey(key.to_bytes()), &key)
+            .expect("serialization cannot fail");
 
             let ret = client
                 .post(api_url.join("/room/create")?)
@@ -527,15 +516,10 @@ async fn main_api(api_url: Url, command: ApiCommand) -> Result<()> {
             let payload = ChatPayload {
                 room: Id(room),
                 rich_text: RichText::from(text),
-            };
+            }
             // FIXME: Same key.
-            let payload = Signed::sign(
-                &PubKey(key.to_bytes()),
-                &key,
-                get_timestamp(),
-                &mut OsRng,
-                payload,
-            )?;
+            .sign_msg(&PubKey(key.to_bytes()), &key)
+            .expect("serialization cannot fail");
 
             let ret = client
                 .post(api_url.join(&format!("/room/{room}/msg"))?)

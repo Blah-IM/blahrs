@@ -99,6 +99,36 @@ pub struct Signee<T> {
     pub user: UserKey,
 }
 
+pub trait SignExt: Sized {
+    fn sign_msg_with(
+        self,
+        id_key: &PubKey,
+        act_key: &SigningKey,
+        timestamp: u64,
+        rng: &mut (impl RngCore + ?Sized),
+    ) -> Result<Signed<Self>, SignatureError>;
+
+    fn sign_msg(
+        self,
+        id_key: &PubKey,
+        act_key: &SigningKey,
+    ) -> Result<Signed<Self>, SignatureError> {
+        self.sign_msg_with(id_key, act_key, get_timestamp(), &mut rand::thread_rng())
+    }
+}
+
+impl<T: Serialize> SignExt for T {
+    fn sign_msg_with(
+        self,
+        id_key: &PubKey,
+        act_key: &SigningKey,
+        timestamp: u64,
+        rng: &mut (impl RngCore + ?Sized),
+    ) -> Result<Signed<Self>, SignatureError> {
+        Signed::new(id_key, act_key, timestamp, rng, self)
+    }
+}
+
 pub fn get_timestamp() -> u64 {
     SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
@@ -113,7 +143,9 @@ impl<T: Serialize> Signed<T> {
     }
 
     /// Sign the payload with the given `key`.
-    pub fn sign(
+    ///
+    /// This operation only fail when serialization of `payload` fails.
+    pub fn new(
         id_key: &PubKey,
         act_key: &SigningKey,
         timestamp: u64,
@@ -129,8 +161,9 @@ impl<T: Serialize> Signed<T> {
                 id_key: id_key.clone(),
             },
         };
-        let canonical_signee = serde_jcs::to_vec(&signee).expect("serialization cannot fail");
-        let sig = act_key.try_sign(&canonical_signee)?.to_bytes();
+        let canonical_signee = serde_jcs::to_vec(&signee).map_err(|_| SignatureError::new())?;
+        let sig = act_key.sign(&canonical_signee).to_bytes();
+
         Ok(Self { sig, signee })
     }
 
@@ -592,15 +625,15 @@ mod tests {
         let id_key = SigningKey::from_bytes(&[0x42; 32]);
         let act_key = SigningKey::from_bytes(&[0x43; 32]);
         let timestamp = 0xDEAD_BEEF;
-        let msg = Signed::sign(
+        let msg = ChatPayload {
+            rich_text: RichText::from("hello"),
+            room: Id(42),
+        }
+        .sign_msg_with(
             &PubKey(id_key.verifying_key().to_bytes()),
             &act_key,
             timestamp,
             &mut fake_rng,
-            ChatPayload {
-                rich_text: RichText::from("hello"),
-                room: Id(42),
-            },
         )
         .unwrap();
 
