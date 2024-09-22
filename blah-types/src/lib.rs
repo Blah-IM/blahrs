@@ -8,7 +8,7 @@ use ed25519_dalek::{
     SIGNATURE_LENGTH,
 };
 use identity::IdUrl;
-use rand_core::RngCore;
+use rand::RngCore;
 use serde::{de, Deserialize, Deserializer, Serialize, Serializer};
 use serde_with::{serde_as, DisplayFromStr};
 use url::Url;
