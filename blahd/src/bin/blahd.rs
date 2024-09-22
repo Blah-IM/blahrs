@@ -1,3 +1,4 @@
+use std::future::IntoFuture;
 use std::os::fd::{FromRawFd, OwnedFd};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -5,6 +6,7 @@ use std::sync::Arc;
 use anyhow::{anyhow, bail, Context, Result};
 use blahd::config::{Config, ListenConfig};
 use blahd::{AppState, Database};
+use tokio::signal::unix::{signal, SignalKind};
 
 /// Blah Chat Server
 #[derive(Debug, clap::Parser)]
@@ -94,10 +96,16 @@ async fn main_serve(db: Database, config: Config) -> Result<()> {
     tracing::info!("listening on {listener_display}");
 
     let router = blahd::router(Arc::new(st));
-    let _ = sd_notify::notify(true, &[sd_notify::NotifyState::Ready]);
 
-    axum::serve(listener, router)
-        .await
-        .context("failed to serve")?;
+    let mut sigterm = signal(SignalKind::terminate()).context("failed to listen on SIGTERM")?;
+    let service = axum::serve(listener, router)
+        .with_graceful_shutdown(async move {
+            sigterm.recv().await;
+            tracing::info!("received SIGTERM, shutting down gracefully");
+        })
+        .into_future();
+
+    let _ = sd_notify::notify(true, &[sd_notify::NotifyState::Ready]);
+    service.await.context("failed to serve")?;
     Ok(())
 }

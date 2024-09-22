@@ -104,7 +104,7 @@ fn socket_activate(#[case] unix_socket: bool) {
         }
         ForkResult::Parent { child } => {
             let guard = scopeguard::guard((), |()| {
-                let _ = kill(child, Signal::SIGKILL);
+                let _ = kill(child, Signal::SIGTERM);
             });
 
             if !unix_socket {
@@ -130,15 +130,17 @@ fn socket_activate(#[case] unix_socket: bool) {
             }
 
             let st = waitpid(child, None).unwrap();
-            if unix_socket {
+            let expect_exit_code = if unix_socket {
                 // Fail with unsupported error.
-                assert!(matches!(st, WaitStatus::Exited(_, 1)));
+                1
             } else {
-                assert!(
-                    matches!(st, WaitStatus::Signaled(_, Signal::SIGKILL, _)),
-                    "unexpected exit status {st:?}",
-                );
-            }
+                // Graceful shutdown.
+                0
+            };
+            assert!(
+                matches!(st, WaitStatus::Exited(_, code) if code == expect_exit_code),
+                "unexpected exit status {st:?}",
+            );
         }
     }
 }
