@@ -46,6 +46,11 @@ impl UserIdentityDesc {
 
     /// Validate signatures of the identity description at given time.
     pub fn verify(&self, id_url: Option<&IdUrl>, now_timestamp: u64) -> Result<(), VerifyError> {
+        if let Some(id_url) = id_url {
+            if !self.profile.signee.payload.id_urls.contains(id_url) {
+                return Err(VerifyErrorImpl::MissingIdUrl.into());
+            }
+        }
         if self.id_key != self.profile.signee.user.id_key {
             return Err(VerifyErrorImpl::ProfileIdKeyMismatch.into());
         }
@@ -75,11 +80,6 @@ impl UserIdentityDesc {
         self.profile
             .verify()
             .map_err(VerifyErrorImpl::ProfileSignature)?;
-        if let Some(id_url) = id_url {
-            if !self.profile.signee.payload.id_urls.contains(id_url) {
-                return Err(VerifyErrorImpl::MissingIdUrl.into());
-            }
-        }
         Ok(())
     }
 }
@@ -138,7 +138,7 @@ impl ops::Deref for IdUrl {
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 #[non_exhaustive]
 pub enum IdUrlError {
-    #[error(transparent)]
+    #[error("invalid id-URL: {0}")]
     ParseUrl(#[from] url::ParseError),
     #[error("id-URL too long")]
     TooLong,
@@ -198,16 +198,21 @@ impl FromStr for IdUrl {
 
 #[cfg(test)]
 mod tests {
+    use ed25519_dalek::SigningKey;
+
+    use crate::SignExt;
+
     use super::*;
 
     #[test]
     fn parse_id_url() {
         let parse = <str>::parse::<IdUrl>;
 
-        assert!(matches!(
-            parse("not-a-url").unwrap_err(),
-            IdUrlError::ParseUrl(_)
-        ));
+        // Error message.
+        assert_eq!(
+            parse("not-a-url").unwrap_err().to_string(),
+            "invalid id-URL: relative URL without a base",
+        );
 
         macro_rules! check_err {
             ($($s:expr, $err:expr;)*) => {
@@ -240,5 +245,143 @@ mod tests {
         let expect = parse("https://example.com/").unwrap();
         assert_eq!(parse("https://example.com").unwrap(), expect);
         assert_eq!(parse("https://:@example.com").unwrap(), expect);
+    }
+
+    #[test]
+    fn id_desc_verify() {
+        const TIMESTAMP: u64 = 42;
+
+        let rng = &mut rand::rngs::mock::StepRng::new(42, 1);
+        let id_url = "https://example.com".parse::<IdUrl>().unwrap();
+        let id_priv = SigningKey::from_bytes(&[42; 32]);
+        let id_key = PubKey::from(id_priv.verifying_key());
+        let mut id_desc = UserIdentityDesc {
+            id_key: id_key.clone(),
+            act_keys: Vec::new(),
+            profile: UserProfile {
+                preferred_chat_server_urls: Vec::new(),
+                id_urls: vec![id_url],
+            }
+            .sign_msg_with(&id_key, &id_priv, TIMESTAMP, rng)
+            .unwrap(),
+        };
+
+        macro_rules! assert_err {
+            ($ret:expr, $pat:pat $(,)?) => {{
+                let err: VerifyError = $ret.unwrap_err();
+                assert!(
+                    matches!(err.0, $pat),
+                    "unexpected result, got: {err:?}, expect: {}",
+                    stringify!($pat),
+                )
+            }};
+        }
+
+        // Mismatch.
+        assert_err!(
+            id_desc.verify(Some(&"https://not-example.com".parse().unwrap()), TIMESTAMP),
+            VerifyErrorImpl::MissingIdUrl,
+        );
+        assert_err!(
+            id_desc.verify(None, TIMESTAMP),
+            VerifyErrorImpl::ProfileSigner,
+        );
+
+        // Ok.
+        id_desc.act_keys.push(
+            UserActKeyDesc {
+                act_key: id_key.clone(),
+                expire_time: TIMESTAMP + 1,
+                comment: String::new(),
+            }
+            .sign_msg_with(&id_key, &id_priv, TIMESTAMP, rng)
+            .unwrap(),
+        );
+        id_desc.verify(None, TIMESTAMP).unwrap();
+
+        // Expired.
+        assert_err!(
+            id_desc.verify(None, TIMESTAMP + 2),
+            VerifyErrorImpl::ProfileSigner,
+        );
+
+        let act_priv = SigningKey::from_bytes(&[24; 32]);
+        let act_pub = PubKey::from(act_priv.verifying_key());
+        id_desc.act_keys.push(
+            UserActKeyDesc {
+                act_key: act_pub.clone(),
+                expire_time: TIMESTAMP + 1,
+                comment: String::new(),
+            }
+            // Self-signed.
+            .sign_msg_with(&id_key, &act_priv, TIMESTAMP, rng)
+            .unwrap(),
+        );
+        assert_err!(
+            id_desc.verify(None, TIMESTAMP),
+            VerifyErrorImpl::ActKeySigner(1),
+        );
+
+        id_desc.act_keys[1] = UserActKeyDesc {
+            act_key: act_pub.clone(),
+            expire_time: TIMESTAMP + 1,
+            comment: String::new(),
+        }
+        // Wrong id_key.
+        .sign_msg_with(&act_pub, &act_priv, TIMESTAMP, rng)
+        .unwrap();
+        assert_err!(
+            id_desc.verify(None, TIMESTAMP),
+            VerifyErrorImpl::ActKeySigner(1),
+        );
+
+        // OK act key.
+        id_desc.act_keys[1] = UserActKeyDesc {
+            act_key: act_pub.clone(),
+            expire_time: TIMESTAMP + 1,
+            comment: String::new(),
+        }
+        .sign_msg_with(&id_key, &id_priv, TIMESTAMP, rng)
+        .unwrap();
+        id_desc.verify(None, TIMESTAMP).unwrap();
+
+        // Profile id_key mismatch.
+        id_desc.profile = id_desc
+            .profile
+            .signee
+            .payload
+            .sign_msg(&act_pub, &act_priv)
+            .unwrap();
+        assert_err!(
+            id_desc.verify(None, TIMESTAMP),
+            VerifyErrorImpl::ProfileIdKeyMismatch,
+        );
+
+        // OK, signed by act key.
+        id_desc.profile = id_desc
+            .profile
+            .signee
+            .payload
+            .sign_msg(&id_key, &act_priv)
+            .unwrap();
+        id_desc.verify(None, TIMESTAMP).unwrap();
+
+        // Invalid signature.
+        id_desc.profile.sig[0] = 0;
+        assert_err!(
+            id_desc.verify(None, TIMESTAMP),
+            VerifyErrorImpl::ProfileSignature(_),
+        );
+        id_desc.act_keys[1].sig[0] = 0;
+        assert_err!(
+            id_desc.verify(None, TIMESTAMP),
+            VerifyErrorImpl::ActKeySignature(1, _),
+        );
+
+        // Error message.
+        assert_eq!(
+            id_desc.verify(None, TIMESTAMP).unwrap_err().to_string(),
+            "invalid act_key[1] signature: signature error: Verification equation was not satisfied",
+        );
     }
 }

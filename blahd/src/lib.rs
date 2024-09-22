@@ -36,7 +36,7 @@ mod id;
 mod register;
 mod utils;
 
-pub use database::Database;
+pub use database::{Config as DatabaseConfig, Database};
 pub use middleware::ApiError;
 
 #[serde_inline_default]
@@ -202,7 +202,7 @@ async fn user_get(
 async fn user_register(
     State(st): ArcState,
     SignedJson(msg): SignedJson<UserRegisterPayload>,
-) -> impl IntoResponse {
+) -> Result<StatusCode, ApiError> {
     register::user_register(&st, msg).await
 }
 
