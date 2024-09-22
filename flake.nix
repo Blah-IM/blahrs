@@ -97,7 +97,10 @@ rec {
         {
           default = pkgs.mkShell {
             inputsFrom = [ self.packages.${system}.default ];
-            nativeBuildInputs = [ pkgs.buildPackages.sqlite-interactive ];
+            nativeBuildInputs = [
+              pkgs.buildPackages.sqlite-interactive
+              pkgs.cargo-llvm-cov
+            ];
 
             env.RUST_LOG = "blahd=debug,blahctl=debug";
           };

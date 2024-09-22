@@ -1,9 +1,12 @@
+# Build and test artifacts.
 /target
 *.sqlite*
 *.key
+*.profraw
+result
+result-*
 
+# Test configurations.
 config.toml
 /test-frontend/default.json
 /test-frontend/.well-known
-result
-result-*
