@@ -268,7 +268,7 @@ fn userkey_parser(s: &str) -> clap::error::Result<VerifyingKey> {
 impl User {
     async fn fetch_key(&self) -> Result<PubKey> {
         let rawkey = if let Some(key) = &self.key {
-            return Ok(PubKey(key.to_bytes()));
+            return Ok(key.into());
         } else if let Some(path) = &self.public_key_file {
             fs::read_to_string(path).context("failed to read key file")?
         } else if let Some(url) = &self.url {
@@ -336,7 +336,7 @@ fn main_id(cmd: IdCommand) -> Result<()> {
             id_url,
         } => {
             let id_key_priv = SigningKey::generate(&mut thread_rng());
-            let id_key = PubKey(id_key_priv.verifying_key().to_bytes());
+            let id_key = PubKey::from(id_key_priv.verifying_key());
 
             let act_key_desc = UserActKeyDesc {
                 act_key: id_key.clone(),
@@ -378,7 +378,7 @@ fn main_id(cmd: IdCommand) -> Result<()> {
             let mut id_desc = serde_json::from_str::<UserIdentityDesc>(&id_desc)
                 .context("failed to parse desc_file")?;
             let id_key_priv = load_signing_key(&id_key_file)?;
-            let id_key = PubKey(id_key_priv.verifying_key().to_bytes());
+            let id_key = id_key_priv.verifying_key().into();
             // TODO: Dedup this check.
             ensure!(id_key == id_desc.id_key, "id_key mismatch with key file");
             ensure!(
@@ -416,7 +416,7 @@ fn main_id(cmd: IdCommand) -> Result<()> {
             let mut id_desc = serde_json::from_str::<UserIdentityDesc>(&id_desc)
                 .context("failed to parse desc_file")?;
             let id_key_priv = load_signing_key(&id_key_file)?;
-            let id_key = PubKey(id_key_priv.verifying_key().to_bytes());
+            let id_key = id_key_priv.verifying_key().into();
             ensure!(id_key == id_desc.id_key, "id_key mismatch with key file");
             let exists = id_desc
                 .act_keys
@@ -494,7 +494,7 @@ async fn main_api(api_url: Url, command: ApiCommand) -> Result<()> {
                 title,
             })
             // FIXME: Same key.
-            .sign_msg(&PubKey(key.to_bytes()), &key)
+            .sign_msg(&key.verifying_key().into(), &key)
             .expect("serialization cannot fail");
 
             let ret = client
@@ -518,7 +518,7 @@ async fn main_api(api_url: Url, command: ApiCommand) -> Result<()> {
                 rich_text: RichText::from(text),
             }
             // FIXME: Same key.
-            .sign_msg(&PubKey(key.to_bytes()), &key)
+            .sign_msg(&key.verifying_key().into(), &key)
             .expect("serialization cannot fail");
 
             let ret = client

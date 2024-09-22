@@ -12,7 +12,7 @@ use axum::http::HeaderMap;
 use blah_types::identity::{IdUrl, UserActKeyDesc, UserIdentityDesc, UserProfile};
 use blah_types::{
     AuthPayload, ChatPayload, CreateGroup, CreatePeerChat, CreateRoomPayload, DeleteRoomPayload,
-    Id, MemberPermission, PubKey, RichText, RoomAdminOp, RoomAdminPayload, RoomAttrs, RoomMetadata,
+    Id, MemberPermission, RichText, RoomAdminOp, RoomAdminPayload, RoomAttrs, RoomMetadata,
     ServerPermission, SignExt, Signed, SignedChatMsg, UserKey, UserRegisterPayload, WithMsgId,
     X_BLAH_DIFFICULTY, X_BLAH_NONCE,
 };
@@ -68,8 +68,8 @@ impl User {
         let act_priv = SigningKey::from_bytes(&[b.to_ascii_lowercase(); 32]);
         Self {
             pubkeys: UserKey {
-                id_key: PubKey(id_priv.verifying_key().to_bytes()),
-                act_key: PubKey(act_priv.verifying_key().to_bytes()),
+                id_key: id_priv.verifying_key().into(),
+                act_key: act_priv.verifying_key().into(),
             },
             id_priv,
             act_priv,

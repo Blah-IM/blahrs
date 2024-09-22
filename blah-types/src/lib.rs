@@ -61,7 +61,7 @@ pub struct UserKey {
     pub act_key: PubKey,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct PubKey(#[serde(with = "hex::serde")] pub [u8; PUBLIC_KEY_LENGTH]);
 
@@ -73,11 +73,29 @@ impl FromStr for PubKey {
     }
 }
 
+impl fmt::Debug for PubKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("PubKey").field(&self.to_string()).finish()
+    }
+}
+
 impl fmt::Display for PubKey {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut buf = [0u8; PUBLIC_KEY_LENGTH * 2];
         hex::encode_to_slice(self.0, &mut buf).expect("buf size is correct");
         f.write_str(std::str::from_utf8(&buf).expect("hex must be UTF-8"))
+    }
+}
+
+impl From<VerifyingKey> for PubKey {
+    fn from(vk: VerifyingKey) -> Self {
+        Self(vk.to_bytes())
+    }
+}
+
+impl From<&VerifyingKey> for PubKey {
+    fn from(vk: &VerifyingKey) -> Self {
+        Self(vk.to_bytes())
     }
 }
 
@@ -157,7 +175,7 @@ impl<T: Serialize> Signed<T> {
             payload,
             timestamp,
             user: UserKey {
-                act_key: PubKey(act_key.verifying_key().to_bytes()),
+                act_key: act_key.verifying_key().into(),
                 id_key: id_key.clone(),
             },
         };
@@ -578,7 +596,7 @@ mod sql_impl {
             let rawkey = <[u8; PUBLIC_KEY_LENGTH]>::column_result(value)?;
             let key = VerifyingKey::from_bytes(&rawkey)
                 .map_err(|err| FromSqlError::Other(format!("invalid pubkey: {err}").into()))?;
-            Ok(PubKey(key.to_bytes()))
+            Ok(key.into())
         }
     }
 
@@ -635,7 +653,7 @@ mod tests {
             room: Id(42),
         }
         .sign_msg_with(
-            &PubKey(id_key.verifying_key().to_bytes()),
+            &id_key.verifying_key().into(),
             &act_key,
             timestamp,
             &mut fake_rng,

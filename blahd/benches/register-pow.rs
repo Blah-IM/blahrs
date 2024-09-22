@@ -12,9 +12,9 @@ fn bench_register_pow(c: &mut Criterion) {
     let rng = &mut thread_rng();
 
     let id_key_priv = SigningKey::from_bytes(&[0x1A; 32]);
-    let id_key = PubKey(id_key_priv.verifying_key().to_bytes());
+    let id_key = PubKey::from(id_key_priv.verifying_key());
     let act_key_priv = SigningKey::from_bytes(&[0x2B; 32]);
-    let act_key = PubKey(act_key_priv.verifying_key().to_bytes());
+    let act_key = act_key_priv.verifying_key().into();
     let payload = UserRegisterPayload {
         id_key: id_key.clone(),
         server_url: "http://some.example.com".parse().unwrap(),
