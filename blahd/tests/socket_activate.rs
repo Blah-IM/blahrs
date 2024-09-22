@@ -68,6 +68,17 @@ fn socket_activate(#[case] unix_socket: bool) {
     memfd.write_all(CONFIG.as_bytes()).unwrap();
     memfd.rewind().unwrap();
 
+    // Inherit environment variables.
+    let envs = std::env::vars()
+        .filter(|(name, _)| !name.starts_with("LISTEN_"))
+        .map(|(name, value)| CString::new(format!("{name}={value}")).unwrap())
+        .collect::<Vec<_>>();
+    let mut env_ptrs = envs
+        .iter()
+        .map(|s| s.as_ptr())
+        .chain([c"LISTEN_FDS=1".as_ptr(), null(), null()])
+        .collect::<Vec<_>>();
+
     // Unfortunately we have to deal with raw `fork(2)` here, because no library supports passing
     // child PID in environment variables for child.
     // SAFETY: Between `fork()` and `execve()`, all syscalls are async-signal-safe:
@@ -94,11 +105,13 @@ fn socket_activate(#[case] unix_socket: bool) {
             ];
             let mut buf = [0u8; 64];
             let _ = write!(&mut buf[..], "LISTEN_PID={}\0", getpid().as_raw());
-            let envs = [c"LISTEN_FDS=1".as_ptr(), buf.as_ptr().cast(), null()];
+            let pos = env_ptrs.len() - 2;
+            env_ptrs[pos] = buf.as_ptr().cast();
+
             // NB. Do raw libc call, not the wrapper fn that does allocation inside.
             // SAFETY: Valid NULL-terminated array of NULL-terminated strings.
             unsafe {
-                execve(server_exe_c.as_ptr(), args.as_ptr(), envs.as_ptr());
+                execve(server_exe_c.as_ptr(), args.as_ptr(), env_ptrs.as_ptr());
                 // If exec fail, the drop guard will abort the process anyway. Do nothing.
             }
         }
