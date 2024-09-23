@@ -1,4 +1,5 @@
 use std::backtrace::Backtrace;
+use std::convert::Infallible;
 use std::fmt;
 use std::sync::Arc;
 
@@ -56,6 +57,13 @@ impl IntoResponse for ApiError {
         let mut resp = Json(Resp { error: &self }).into_response();
         *resp.status_mut() = self.status;
         resp
+    }
+}
+
+// For infallible extractors.
+impl From<Infallible> for ApiError {
+    fn from(v: Infallible) -> Self {
+        match v {}
     }
 }
 

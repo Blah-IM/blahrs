@@ -43,6 +43,12 @@ max_request_len = 4096
 # The maximum timestamp tolerance in seconds for request validation.
 timestamp_tolerance_secs = 90
 
+[server.feed]
+# Additional page length limit for room feed.
+# Feed are fetched frequently and older items are rarely useful. You do want a
+# large response for feed.
+max_page_len = 64
+
 [server.ws]
 
 # The max waiting time for the first authentication message for websocket.

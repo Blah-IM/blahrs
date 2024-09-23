@@ -18,6 +18,7 @@ use blah_types::{
 };
 use blahd::{ApiError, AppState, Database, RoomList, RoomMsgs};
 use ed25519_dalek::SigningKey;
+use expect_test::expect;
 use futures_util::future::BoxFuture;
 use futures_util::{SinkExt, Stream, StreamExt, TryFutureExt};
 use parking_lot::Mutex;
@@ -32,17 +33,21 @@ use tokio::net::TcpListener;
 // Register API requires a non-IP hostname.
 const LOCALHOST: &str = "localhost";
 const REGISTER_DIFFICULTY: u8 = 1;
+const BASE_URL: &str = "http://base.example.com";
 
 const TIME_TOLERANCE: Duration = Duration::from_millis(100);
 const WS_CONNECT_TIMEOUT: Duration = Duration::from_millis(1500);
 
-const CONFIG: fn(u16) -> String = |port| {
+const CONFIG: fn(u16) -> String = |_port| {
     format!(
         r#"
-base_url="http://{LOCALHOST}:{port}"
+base_url="{BASE_URL}"
 
 [ws]
 auth_timeout_sec = 1
+
+[feed]
+max_page_len = 2
 
 [register]
 enable_public = true
@@ -722,6 +727,61 @@ async fn room_chat_post_read(server: Server) {
 
 #[rstest]
 #[tokio::test]
+async fn room_feed(server: Server) {
+    // Only public readable rooms provides feed. Not even for public joinable ones.
+    let rid_need_join = server
+        .create_room(&ALICE, RoomAttrs::PUBLIC_JOINABLE, "not so public")
+        .await
+        .unwrap();
+    server
+        .get::<NoContent>(&format!("/room/{rid_need_join}/feed.json"), None)
+        .await
+        .expect_api_err(StatusCode::NOT_FOUND, "room_not_found");
+
+    let rid = server
+        .create_room(
+            &ALICE,
+            RoomAttrs::PUBLIC_READABLE | RoomAttrs::PUBLIC_JOINABLE,
+            "public",
+        )
+        .await
+        .unwrap();
+    server
+        .join_room(rid, &BOB, MemberPermission::POST_CHAT)
+        .await
+        .unwrap();
+    server.post_chat(rid, &ALICE, "a").await.unwrap();
+    let cid2 = server.post_chat(rid, &BOB, "b1").await.unwrap().cid;
+    server.post_chat(rid, &BOB, "b2").await.unwrap();
+
+    let feed = server
+        .get::<serde_json::Value>(&format!("/room/{rid}/feed.json"), None)
+        .await
+        .unwrap();
+    // TODO: Ideally we should assert on the result, but it contains time and random id currently.
+    assert_eq!(feed["title"].as_str().unwrap(), "public");
+    assert_eq!(feed["items"].as_array().unwrap().len(), 2);
+    let feed_url = format!("{BASE_URL}/_blah/room/{rid}/feed.json");
+    assert_eq!(feed["feed_url"].as_str().unwrap(), feed_url,);
+    assert_eq!(
+        feed["next_url"].as_str().unwrap(),
+        format!("{feed_url}?skipToken={cid2}&top=2"),
+    );
+
+    let feed2 = server
+        .get::<serde_json::Value>(
+            &format!("/room/{rid}/feed.json?skipToken={cid2}&top=2"),
+            None,
+        )
+        .await
+        .unwrap();
+    let items = feed2["items"].as_array().unwrap();
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0]["content_html"].as_str().unwrap(), "a");
+}
+
+#[rstest]
+#[tokio::test]
 async fn last_seen(server: Server) {
     let title = "public room";
     let attrs = RoomAttrs::PUBLIC_READABLE | RoomAttrs::PUBLIC_JOINABLE;
@@ -989,7 +1049,7 @@ async fn register_flow(server: Server) {
     register_fast(&req)
         .await
         .expect_api_err(StatusCode::BAD_REQUEST, "invalid_server_url");
-    req.server_url = format!("http://{}", server.domain()).parse().unwrap();
+    req.server_url = BASE_URL.parse().unwrap();
 
     register_fast(&req)
         .await

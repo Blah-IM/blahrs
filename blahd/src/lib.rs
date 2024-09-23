@@ -3,10 +3,10 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use anyhow::Result;
-use axum::extract::ws;
+use axum::extract::{ws, OriginalUri};
 use axum::extract::{Path, Query, State, WebSocketUpgrade};
 use axum::http::{header, HeaderMap, HeaderName, StatusCode};
-use axum::response::{IntoResponse, Response};
+use axum::response::Response;
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use axum_extra::extract::WithRejection as R;
@@ -17,7 +17,6 @@ use blah_types::{
     X_BLAH_NONCE,
 };
 use database::{Transaction, TransactionOps};
-use ed25519_dalek::SIGNATURE_LENGTH;
 use id::IdExt;
 use middleware::{Auth, MaybeAuth, ResultExt as _, SignedJson};
 use parking_lot::Mutex;
@@ -32,6 +31,7 @@ mod middleware;
 pub mod config;
 mod database;
 mod event;
+mod feed;
 mod id;
 mod register;
 mod utils;
@@ -54,6 +54,8 @@ pub struct ServerConfig {
     #[serde_inline_default(90)]
     pub timestamp_tolerance_secs: u64,
 
+    #[serde(default)]
+    pub feed: feed::Config,
     #[serde(default)]
     pub ws: event::Config,
     #[serde(default)]
@@ -135,7 +137,6 @@ pub fn router(st: Arc<AppState>) -> Router {
         .route("/room", get(room_list))
         .route("/room/create", post(room_create))
         .route("/room/:rid", get(room_get_metadata).delete(room_delete))
-        // NB. Sync with `feed_url` and `next_url` generation.
         .route("/room/:rid/feed.json", get(room_get_feed))
         .route("/room/:rid/msg", get(room_msg_list).post(room_msg_post))
         .route("/room/:rid/msg/:cid/seen", post(room_msg_mark_seen))
@@ -425,9 +426,23 @@ async fn room_get_metadata(
 
 async fn room_get_feed(
     st: ArcState,
+    R(OriginalUri(req_uri), _): RE<OriginalUri>,
     R(Path(rid), _): RE<Path<Id>>,
-    R(Query(pagination), _): RE<Query<Pagination>>,
-) -> Result<impl IntoResponse, ApiError> {
+    R(Query(mut pagination), _): RE<Query<Pagination>>,
+) -> Result<Response, ApiError> {
+    // TODO: If-None-Match.
+    let self_url = st
+        .config
+        .base_url
+        .join(req_uri.path())
+        .expect("base_url can be a base");
+
+    pagination.top = Some(
+        pagination
+            .effective_page_len(&st)
+            .min(st.config.feed.max_page_len),
+    );
+
     let (title, msgs, skip_token) = st.db.with_read(|txn| {
         let (attrs, title) = txn.get_room_having(rid, RoomAttrs::PUBLIC_READABLE)?;
         // Sanity check.
@@ -437,40 +452,13 @@ async fn room_get_feed(
         Ok((title, msgs, skip_token))
     })?;
 
-    let items = msgs
-        .into_iter()
-        .map(|WithMsgId { cid, msg }| {
-            let time = SystemTime::UNIX_EPOCH + Duration::from_secs(msg.signee.timestamp);
-            let author = FeedAuthor {
-                // TODO: Retrieve id_url as name.
-                name: msg.signee.user.id_key.to_string(),
-            };
-            FeedItem {
-                id: cid.to_string(),
-                content_html: msg.signee.payload.rich_text.html().to_string(),
-                date_published: humantime::format_rfc3339(time).to_string(),
-                authors: (author,),
-                extra: FeedItemExtra {
-                    timestamp: msg.signee.timestamp,
-                    nonce: msg.signee.nonce,
-                    sig: msg.sig,
-                },
-            }
-        })
-        .collect::<Vec<_>>();
-
-    let feed_url = st
-        .config
-        .base_url
-        .join(&format!("/room/{rid}/feed.json"))
-        .expect("base_url must be valid");
     let next_url = skip_token.map(|skip_token| {
         let next_params = Pagination {
             skip_token: Some(skip_token),
             top: pagination.top,
             until_token: None,
         };
-        let mut next_url = feed_url.clone();
+        let mut next_url = self_url.clone();
         {
             let mut query = next_url.query_pairs_mut();
             let ser = serde_urlencoded::Serializer::new(&mut query);
@@ -481,51 +469,8 @@ async fn room_get_feed(
         }
         next_url
     });
-    let feed = FeedRoom {
-        title,
-        items,
-        next_url,
-        feed_url,
-    };
 
-    Ok((
-        [(header::CONTENT_TYPE, "application/feed+json")],
-        Json(feed),
-    ))
-}
-
-/// Ref: <https://www.jsonfeed.org/version/1.1/>
-#[derive(Debug, Serialize)]
-#[serde(tag = "version", rename = "https://jsonfeed.org/version/1.1")]
-struct FeedRoom {
-    title: String,
-    feed_url: Url,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    next_url: Option<Url>,
-    items: Vec<FeedItem>,
-}
-
-#[derive(Debug, Serialize)]
-struct FeedItem {
-    id: String,
-    content_html: String,
-    date_published: String,
-    authors: (FeedAuthor,),
-    #[serde(rename = "_blah")]
-    extra: FeedItemExtra,
-}
-
-#[derive(Debug, Serialize)]
-struct FeedAuthor {
-    name: String,
-}
-
-#[derive(Debug, Serialize)]
-struct FeedItemExtra {
-    timestamp: u64,
-    nonce: u32,
-    #[serde(with = "hex::serde")]
-    sig: [u8; SIGNATURE_LENGTH],
+    Ok(feed::to_json_feed(title, msgs, self_url, next_url))
 }
 
 /// Get room messages with pagination parameters,

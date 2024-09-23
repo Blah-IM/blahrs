@@ -314,6 +314,7 @@ dependencies = [
  "blah-types",
  "clap",
  "ed25519-dalek",
+ "expect-test",
  "futures-util",
  "hex",
  "http-body-util",
