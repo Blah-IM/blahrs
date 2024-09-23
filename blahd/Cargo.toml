@@ -3,10 +3,6 @@ name = "blahd"
 version = "0.0.0"
 edition = "2021"
 
-[[bench]]
-name = "register-pow"
-harness = false
-
 [dependencies]
 anyhow = "1"
 axum = { version = "0.7", features = ["ws"] }
@@ -41,7 +37,6 @@ url = { version = "2", features = ["serde"] }
 blah-types = { path = "../blah-types", features = ["rusqlite"] }
 
 [dev-dependencies]
-criterion = "0.5"
 nix = { version = "0.29", features = ["fs", "process", "signal"] }
 reqwest = { version = "0.12", features = ["json"] }
 rstest = { version = "0.22", default-features = false }

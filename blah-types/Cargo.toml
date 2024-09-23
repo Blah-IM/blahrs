@@ -3,6 +3,10 @@ name = "blah-types"
 version = "0.0.0"
 edition = "2021"
 
+[[bench]]
+name = "crypto_ops"
+harness = false
+
 [dependencies]
 bitflags = "2"
 bitflags_serde_shim = "0.2"
@@ -19,7 +23,10 @@ thiserror = "1"
 url = { version = "2", features = ["serde"] }
 
 [dev-dependencies]
+criterion = "0.5"
+ed25519-dalek = { version = "2", features = ["rand_core"] }
 expect-test = "1"
+sha2 = "0.10"
 
 [lints]
 workspace = true

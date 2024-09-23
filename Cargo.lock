@@ -271,6 +271,7 @@ version = "0.0.0"
 dependencies = [
  "bitflags",
  "bitflags_serde_shim",
+ "criterion",
  "ed25519-dalek",
  "expect-test",
  "hex",
@@ -281,6 +282,7 @@ dependencies = [
  "serde_jcs",
  "serde_json",
  "serde_with",
+ "sha2",
  "thiserror",
  "url",
 ]
@@ -311,7 +313,6 @@ dependencies = [
  "axum-extra",
  "blah-types",
  "clap",
- "criterion",
  "ed25519-dalek",
  "futures-util",
  "hex",
