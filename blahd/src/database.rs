@@ -1,3 +1,4 @@
+use std::num::NonZero;
 use std::path::PathBuf;
 
 use anyhow::{ensure, Context};
@@ -283,7 +284,11 @@ pub trait TransactionOps {
         .map_err(Into::into)
     }
 
-    fn list_public_rooms(&self, start_rid: Id, page_len: usize) -> Result<Vec<RoomMetadata>> {
+    fn list_public_rooms(
+        &self,
+        start_rid: Id,
+        page_len: NonZero<u32>,
+    ) -> Result<Vec<RoomMetadata>> {
         // Attribute check must be written in the SQL literal so the query planer
         // can successfully pick the conditional index.
         const _: () = assert!(RoomAttrs::PUBLIC_READABLE.bits() == 1);
@@ -312,7 +317,7 @@ pub trait TransactionOps {
         &self,
         uid: i64,
         start_rid: Id,
-        page_len: usize,
+        page_len: NonZero<u32>,
     ) -> Result<Vec<RoomMetadata>> {
         prepare_cached_and_bind!(
             self.conn(),
@@ -344,7 +349,7 @@ pub trait TransactionOps {
         &self,
         uid: i64,
         start_rid: Id,
-        page_len: usize,
+        page_len: NonZero<u32>,
     ) -> Result<Vec<RoomMetadata>> {
         prepare_cached_and_bind!(
             self.conn(),
@@ -385,7 +390,7 @@ pub trait TransactionOps {
         rid: Id,
         after_cid: Id,
         before_cid: Id,
-        page_len: usize,
+        page_len: NonZero<u32>,
     ) -> Result<Vec<WithMsgId<SignedChatMsg>>> {
         prepare_cached_and_bind!(
             self.conn(),

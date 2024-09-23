@@ -1,4 +1,4 @@
-use std::num::NonZeroUsize;
+use std::num::NonZero;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
@@ -47,7 +47,7 @@ pub struct ServerConfig {
     pub base_url: Url,
 
     #[serde_inline_default(1024.try_into().expect("not zero"))]
-    pub max_page_len: NonZeroUsize,
+    pub max_page_len: NonZero<u32>,
     #[serde_inline_default(4096)] // 4KiB
     pub max_request_len: usize,
 
@@ -220,7 +220,7 @@ struct ListRoomParams {
     // Workaround: serde(flatten) breaks deserialization
     // See: https://github.com/nox/serde_urlencoded/issues/33
     skip_token: Option<Id>,
-    top: Option<NonZeroUsize>,
+    top: Option<NonZero<u32>>,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize)]
@@ -260,8 +260,8 @@ async fn room_list(
         }
     })?;
 
-    let skip_token =
-        (rooms.len() == page_len).then(|| rooms.last().expect("page must not be empty").rid);
+    let skip_token = (rooms.len() as u32 == page_len.get())
+        .then(|| rooms.last().expect("page must not be empty").rid);
     Ok(Json(RoomList { rooms, skip_token }))
 }
 
@@ -354,18 +354,17 @@ struct Pagination {
     /// A opaque token from previous response to fetch the next page.
     skip_token: Option<Id>,
     /// Maximum page size.
-    top: Option<NonZeroUsize>,
+    top: Option<NonZero<u32>>,
     /// Only return items before (excluding) this token.
     /// Useful for `room_msg_list` to pass `last_seen_cid` without over-fetching.
     until_token: Option<Id>,
 }
 
 impl Pagination {
-    fn effective_page_len(&self, st: &AppState) -> usize {
+    fn effective_page_len(&self, st: &AppState) -> NonZero<u32> {
         self.top
-            .unwrap_or(usize::MAX.try_into().expect("not zero"))
+            .unwrap_or(u32::MAX.try_into().expect("not zero"))
             .min(st.config.max_page_len)
-            .get()
     }
 }
 
@@ -544,8 +543,8 @@ fn query_room_msgs(
         pagination.skip_token.unwrap_or(Id::MAX),
         page_len,
     )?;
-    let skip_token =
-        (msgs.len() == page_len).then(|| msgs.last().expect("page must not be empty").cid);
+    let skip_token = (msgs.len() as u32 == page_len.get())
+        .then(|| msgs.last().expect("page must not be empty").cid);
     Ok((msgs, skip_token))
 }
 
