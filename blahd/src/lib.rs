@@ -102,32 +102,20 @@ impl AppState {
     }
 
     fn verify_signed_data<T: Serialize>(&self, data: &Signed<T>) -> Result<(), ApiError> {
-        let Ok(()) = data.verify() else {
-            return Err(error_response!(
-                StatusCode::BAD_REQUEST,
-                "invalid_signature",
-                "signature verification failed"
-            ));
-        };
+        api_ensure!(data.verify().is_ok(), "signature verification failed");
         let timestamp_diff = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
             .expect("after UNIX epoch")
             .as_secs()
             .abs_diff(data.signee.timestamp);
-        if timestamp_diff > self.config.timestamp_tolerance_secs {
-            return Err(error_response!(
-                StatusCode::BAD_REQUEST,
-                "invalid_timestamp",
-                "invalid timestamp, off by {timestamp_diff}s"
-            ));
-        }
-        if !self.used_nonces.lock().try_insert(data.signee.nonce) {
-            return Err(error_response!(
-                StatusCode::BAD_REQUEST,
-                "duplicated_nonce",
-                "duplicated nonce",
-            ));
-        }
+        api_ensure!(
+            timestamp_diff <= self.config.timestamp_tolerance_secs,
+            "invalid timestamp",
+        );
+        api_ensure!(
+            self.used_nonces.lock().try_insert(data.signee.nonce),
+            "used nonce",
+        );
         Ok(())
     }
 }
@@ -196,7 +184,7 @@ async fn user_get(
             None => None,
             Some(user) => st.db.with_read(|txn| txn.get_user(&user)).ok(),
         }
-        .ok_or_else(|| error_response!(StatusCode::NOT_FOUND, "not_found", "user does not exist"))
+        .ok_or(ApiError::UserNotFound)
     })();
 
     match ret {
@@ -288,23 +276,17 @@ async fn room_create_group(
     user: &UserKey,
     op: CreateGroup,
 ) -> Result<Json<Id>, ApiError> {
-    if !RoomAttrs::GROUP_ATTRS.contains(op.attrs) {
-        return Err(error_response!(
-            StatusCode::BAD_REQUEST,
-            "deserialization",
-            "invalid room attributes",
-        ));
-    }
+    api_ensure!(
+        RoomAttrs::GROUP_ATTRS.contains(op.attrs),
+        "invalid group attributes",
+    );
 
     let rid = st.db.with_write(|conn| {
         let (uid, perm) = conn.get_user(user)?;
-        if !perm.contains(ServerPermission::CREATE_ROOM) {
-            return Err(error_response!(
-                StatusCode::FORBIDDEN,
-                "permission_denied",
-                "the user does not have permission to create room",
-            ));
-        }
+        api_ensure!(
+            perm.contains(ServerPermission::CREATE_ROOM),
+            ApiError::PermissionDenied("the user does not have permission to create room"),
+        );
         let rid = Id::gen();
         conn.create_group(rid, &op.title, op.attrs)?;
         conn.add_room_member(rid, uid, MemberPermission::ALL)?;
@@ -320,13 +302,10 @@ async fn room_create_peer_chat(
     op: CreatePeerChat,
 ) -> Result<Json<Id>, ApiError> {
     let tgt_user_id_key = op.peer;
-    if tgt_user_id_key == src_user.id_key {
-        return Err(error_response!(
-            StatusCode::NOT_IMPLEMENTED,
-            "not_implemented",
-            "self-chat is not implemented yet",
-        ));
-    }
+    api_ensure!(
+        tgt_user_id_key != src_user.id_key,
+        ApiError::NotImplemented("self-chat is not implemented yet"),
+    );
 
     // TODO: Access control and throttling.
     let rid = st.db.with_write(|txn| {
@@ -335,13 +314,7 @@ async fn room_create_peer_chat(
             .get_user_by_id_key(&tgt_user_id_key)
             .ok()
             .filter(|(_, perm)| perm.contains(ServerPermission::ACCEPT_PEER_CHAT))
-            .ok_or_else(|| {
-                error_response!(
-                    StatusCode::NOT_FOUND,
-                    "peer_user_not_found",
-                    "peer user does not exist or disallows peer chat",
-                )
-            })?;
+            .ok_or(ApiError::PeerUserNotFound)?;
         let rid = Id::gen_peer_chat_rid();
         txn.create_peer_room_with_members(rid, RoomAttrs::PEER_CHAT, src_uid, tgt_uid)?;
         Ok(rid)
@@ -509,23 +482,14 @@ async fn room_msg_post(
     R(Path(rid), _): RE<Path<Id>>,
     SignedJson(chat): SignedJson<ChatPayload>,
 ) -> Result<Json<Id>, ApiError> {
-    if rid != chat.signee.payload.room {
-        return Err(error_response!(
-            StatusCode::BAD_REQUEST,
-            "invalid_request",
-            "URI and payload room id mismatch",
-        ));
-    }
+    api_ensure!(rid == chat.signee.payload.room, "room id mismatch with URI");
 
     let (cid, members) = st.db.with_write(|txn| {
         let (uid, perm, ..) = txn.get_room_member(rid, &chat.signee.user)?;
-        if !perm.contains(MemberPermission::POST_CHAT) {
-            return Err(error_response!(
-                StatusCode::FORBIDDEN,
-                "permission_denied",
-                "the user does not have permission to post in the room",
-            ));
-        }
+        api_ensure!(
+            perm.contains(MemberPermission::POST_CHAT),
+            ApiError::PermissionDenied("the user does not have permission to post in the room"),
+        );
 
         let cid = Id::gen();
         txn.add_room_chat_msg(rid, uid, cid, &chat)?;
@@ -556,47 +520,26 @@ async fn room_admin(
     R(Path(rid), _): RE<Path<Id>>,
     SignedJson(op): SignedJson<RoomAdminPayload>,
 ) -> Result<StatusCode, ApiError> {
-    if rid != op.signee.payload.room {
-        return Err(error_response!(
-            StatusCode::BAD_REQUEST,
-            "invalid_request",
-            "URI and payload room id mismatch",
-        ));
-    }
-    if rid.is_peer_chat() {
-        return Err(error_response!(
-            StatusCode::BAD_REQUEST,
-            "invalid_request",
-            "operation not permitted on peer chat rooms",
-        ));
-    }
+    api_ensure!(rid == op.signee.payload.room, "room id mismatch with URI");
+    api_ensure!(!rid.is_peer_chat(), "cannot operate on a peer chat room");
 
     match op.signee.payload.op {
         RoomAdminOp::AddMember { user, permission } => {
-            if user != op.signee.user.id_key {
-                return Err(error_response!(
-                    StatusCode::NOT_IMPLEMENTED,
-                    "not_implemented",
-                    "only self-adding is implemented yet",
-                ));
-            }
-            if !MemberPermission::MAX_SELF_ADD.contains(permission) {
-                return Err(error_response!(
-                    StatusCode::BAD_REQUEST,
-                    "deserialization",
-                    "invalid permission",
-                ));
-            }
+            api_ensure!(
+                user == op.signee.user.id_key,
+                ApiError::NotImplemented("only self-adding is implemented yet"),
+            );
+            api_ensure!(
+                MemberPermission::MAX_SELF_ADD.contains(permission),
+                "invalid initial permission",
+            );
             room_join(&st, rid, &op.signee.user, permission).await?;
         }
         RoomAdminOp::RemoveMember { user } => {
-            if user != op.signee.user.id_key {
-                return Err(error_response!(
-                    StatusCode::NOT_IMPLEMENTED,
-                    "not_implemented",
-                    "only self-removing is implemented yet",
-                ));
-            }
+            api_ensure!(
+                user == op.signee.user.id_key,
+                ApiError::NotImplemented("only self-removal is implemented yet"),
+            );
             room_leave(&st, rid, &op.signee.user).await?;
         }
     }
@@ -622,15 +565,11 @@ async fn room_join(
 
 async fn room_leave(st: &AppState, rid: Id, user: &UserKey) -> Result<(), ApiError> {
     st.db.with_write(|txn| {
+        api_ensure!(!rid.is_peer_chat(), "cannot leave a peer chat room");
         let (uid, ..) = txn.get_room_member(rid, user)?;
         let (attrs, _) = txn.get_room_having(rid, RoomAttrs::empty())?;
-        if attrs.contains(RoomAttrs::PEER_CHAT) {
-            return Err(error_response!(
-                StatusCode::BAD_REQUEST,
-                "invalid_operation",
-                "cannot leave a peer chat room without deleting it",
-            ));
-        }
+        // Sanity check.
+        assert!(!attrs.contains(RoomAttrs::PEER_CHAT));
         txn.remove_room_member(rid, uid)?;
         Ok(())
     })
@@ -641,23 +580,14 @@ async fn room_delete(
     R(Path(rid), _): RE<Path<Id>>,
     SignedJson(op): SignedJson<DeleteRoomPayload>,
 ) -> Result<StatusCode, ApiError> {
-    if rid != op.signee.payload.room {
-        return Err(error_response!(
-            StatusCode::BAD_REQUEST,
-            "invalid_request",
-            "URI and payload room id mismatch",
-        ));
-    }
+    api_ensure!(rid == op.signee.payload.room, "room id mismatch with URI");
     st.db.with_write(|txn| {
         // TODO: Should we only shadow delete here?
         let (_uid, perm, ..) = txn.get_room_member(rid, &op.signee.user)?;
-        if !perm.contains(MemberPermission::DELETE_ROOM) {
-            return Err(error_response!(
-                StatusCode::FORBIDDEN,
-                "permission_denied",
-                "the user does not have permission to delete the room",
-            ));
-        }
+        api_ensure!(
+            perm.contains(MemberPermission::DELETE_ROOM),
+            ApiError::PermissionDenied("the user does not have permission to delete the room")
+        );
         txn.delete_room(rid)?;
         Ok(StatusCode::NO_CONTENT)
     })

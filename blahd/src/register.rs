@@ -151,37 +151,20 @@ pub async fn user_register(
     msg: Signed<UserRegisterPayload>,
 ) -> Result<StatusCode, ApiError> {
     if !st.config.register.enable_public {
-        return Err(error_response!(
-            StatusCode::FORBIDDEN,
-            "disabled",
-            "public registration is disabled",
-        ));
+        return Err(ApiError::Disabled("public registration is disabled"));
     }
 
     let reg = &msg.signee.payload;
 
     // Basic validity check.
-    if reg.server_url != st.config.base_url {
-        return Err(error_response!(
-            StatusCode::BAD_REQUEST,
-            "invalid_server_url",
-            "unexpected server url in payload",
-        ));
-    }
+    api_ensure!(reg.server_url == st.config.base_url, "server url mismatch");
     if let Err(err) = st.config.register.validate_id_url(&reg.id_url) {
-        return Err(error_response!(
-            StatusCode::BAD_REQUEST,
-            "invalid_id_url",
-            "{err}",
-        ));
+        return Err(ApiError::Disabled(err));
     }
-    if !st.register.nonce().contains(&reg.challenge_nonce) {
-        return Err(error_response!(
-            StatusCode::BAD_REQUEST,
-            "invalid_challenge_nonce",
-            "invalid or outdated challenge nonce",
-        ));
-    }
+    api_ensure!(
+        st.register.nonce().contains(&reg.challenge_nonce),
+        "invalid challenge nonce",
+    );
 
     // Challenge verification.
     let expect_bits = st.register.config.difficulty;
@@ -197,13 +180,7 @@ pub async fn user_register(
         let (bytes, bits) = (expect_bits as usize / 8, expect_bits as usize % 8);
         // NB. Shift by 8 would overflow and wrap around for u8. Convert it to u32 first.
         let ok = hash[..bytes].iter().all(|&b| b == 0) && (hash[bytes] as u32) >> (8 - bits) == 0;
-        if !ok {
-            return Err(error_response!(
-                StatusCode::BAD_REQUEST,
-                "invalid_challenge_hash",
-                "challenge failed",
-            ));
-        }
+        api_ensure!(ok, "hash challenge failed");
     }
 
     // TODO: Limit concurrency for the same domain and/or id_key?
@@ -235,13 +212,13 @@ pub async fn user_register(
     let id_desc = match fut.await {
         Ok(id_desc) => id_desc,
         Err(err) => {
-            return Err(error_response!(
-                StatusCode::UNAUTHORIZED,
-                "fetch_id_description",
-                "failed to fetch identity description from {}: {}",
-                reg.id_url,
-                err,
-            ))
+            return Err(ApiError::FetchIdDescription(
+                format!(
+                    "failed to fetch identity description from {}: {}",
+                    reg.id_url, err,
+                )
+                .into(),
+            ));
         }
     };
 
@@ -250,11 +227,7 @@ pub async fn user_register(
         id_desc.verify(Some(&reg.id_url), fetch_time)?;
         Ok(())
     })() {
-        return Err(error_response!(
-            StatusCode::UNAUTHORIZED,
-            "invalid_id_description",
-            "{err}",
-        ));
+        return Err(ApiError::InvalidIdDescription(err.to_string().into()));
     }
 
     // Now the identity is verified.

@@ -7,7 +7,7 @@ use std::sync::Arc;
 use std::task::{Context, Poll};
 use std::time::Duration;
 
-use anyhow::{anyhow, bail, Context as _, Result};
+use anyhow::{bail, Context as _, Result};
 use axum::extract::ws::{Message, WebSocket};
 use blah_types::{AuthPayload, Signed, SignedChatMsg};
 use futures_util::future::Either;
@@ -143,10 +143,7 @@ pub async fn handle_ws(st: Arc<AppState>, ws: &mut WebSocket) -> Result<Infallib
         let auth = serde_json::from_str::<Signed<AuthPayload>>(&payload)?;
         st.verify_signed_data(&auth)?;
 
-        let (uid, _) = st
-            .db
-            .with_read(|txn| txn.get_user(&auth.signee.user))
-            .map_err(|err| anyhow!("{}", err.message))?;
+        let (uid, _) = st.db.with_read(|txn| txn.get_user(&auth.signee.user))?;
         uid
     };
 

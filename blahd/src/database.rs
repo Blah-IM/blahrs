@@ -2,7 +2,6 @@ use std::num::NonZero;
 use std::path::PathBuf;
 
 use anyhow::{ensure, Context};
-use axum::http::StatusCode;
 use blah_types::identity::UserIdentityDesc;
 use blah_types::{
     ChatPayload, Id, MemberPermission, PubKey, RoomAttrs, RoomMetadata, ServerPermission,
@@ -13,7 +12,7 @@ use rusqlite::{named_params, params, prepare_cached_and_bind, Connection, OpenFl
 use serde::Deserialize;
 use serde_inline_default::serde_inline_default;
 
-use crate::ApiError;
+use crate::middleware::ApiError;
 
 #[cfg(test)]
 mod tests;
@@ -182,13 +181,7 @@ pub trait TransactionOps {
         )
         .raw_query()
         .next()?
-        .ok_or_else(|| {
-            error_response!(
-                StatusCode::NOT_FOUND,
-                "not_found",
-                "the user does not exist",
-            )
-        })
+        .ok_or(ApiError::UserNotFound)
         .and_then(|row| Ok((row.get(0)?, row.get(1)?)))
     }
 
@@ -203,13 +196,7 @@ pub trait TransactionOps {
         )
         .raw_query()
         .next()?
-        .ok_or_else(|| {
-            error_response!(
-                StatusCode::NOT_FOUND,
-                "user_not_found",
-                "the user does not exists",
-            )
-        })
+        .ok_or(ApiError::UserNotFound)
         .and_then(|row| Ok((row.get(0)?, row.get(1)?)))
     }
 
@@ -229,13 +216,7 @@ pub trait TransactionOps {
         )
         .raw_query()
         .next()?
-        .ok_or_else(|| {
-            error_response!(
-                StatusCode::NOT_FOUND,
-                "room_not_found",
-                "the room does not exist or user is not a room member",
-            )
-        })
+        .ok_or(ApiError::RoomNotFound)
         .and_then(|row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
     }
 
@@ -258,13 +239,7 @@ pub trait TransactionOps {
         })
         .transpose()?
         .filter(|(attrs, _)| attrs.contains(filter))
-        .ok_or_else(|| {
-            error_response!(
-                StatusCode::NOT_FOUND,
-                "room_not_found",
-                "the room does not exist"
-            )
-        })
+        .ok_or(ApiError::RoomNotFound)
     }
 
     // FIXME: Eliminate this.
@@ -432,13 +407,9 @@ pub trait TransactionOps {
         )
         .raw_query()
         .next()?
-        .ok_or_else(|| {
-            error_response!(
-                StatusCode::CONFLICT,
-                "conflict",
-                "racing register, please try again later",
-            )
-        })
+        .ok_or(ApiError::Conflict(
+            "racing registration, please try again later",
+        ))
         .and_then(|row| Ok(row.get::<_, i64>(0)?))?;
 
         // Delete existing act_keys.
@@ -504,13 +475,10 @@ pub trait TransactionOps {
             "
         )
         .raw_execute()?;
-        if updated == 0 {
-            return Err(error_response!(
-                StatusCode::CONFLICT,
-                "exists",
-                "room already exists"
-            ));
-        }
+        api_ensure!(
+            updated != 0,
+            ApiError::Exists("peer chat room already exists")
+        );
 
         // TODO: Limit permission of the src user?
         let perm = MemberPermission::MAX_PEER_CHAT;
@@ -548,11 +516,7 @@ pub trait TransactionOps {
         )
         .raw_execute()?;
         if updated != 1 {
-            return Err(error_response!(
-                StatusCode::CONFLICT,
-                "exists",
-                "the user already joined the room",
-            ));
+            return Err(ApiError::Exists("the user already joined the room"));
         }
         Ok(())
     }
@@ -602,13 +566,8 @@ pub trait TransactionOps {
         .map(|row| row.get(0))
         .transpose()?
         .unwrap_or(Id(0));
-        if max_cid_in_room < cid {
-            return Err(error_response!(
-                StatusCode::BAD_REQUEST,
-                "invalid_request",
-                "invalid cid",
-            ));
-        }
+        // FIXME: This leaks room existence information.
+        api_ensure!(cid <= max_cid_in_room, "invalid cid");
         let updated = prepare_cached_and_bind!(
             self.conn(),
             r"
@@ -619,11 +578,7 @@ pub trait TransactionOps {
         )
         .raw_execute()?;
         if updated != 1 {
-            return Err(error_response!(
-                StatusCode::NOT_FOUND,
-                "room_not_found",
-                "the room does not exist or the user is not a room member",
-            ));
+            return Err(ApiError::RoomNotFound);
         }
 
         Ok(())

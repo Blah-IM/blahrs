@@ -15,6 +15,7 @@ html-escape = "0.2"
 http-body-util = "0.1"
 humantime = "2"
 parking_lot = "0.12" # Maybe no better performance, just that we hate poisoning. ¯\_(ツ)_/¯
+paste = "1.0.15"
 rand = "0.8"
 reqwest = "0.12"
 rusqlite = { version = "0.32", features = ["rusqlite-macros"] }

@@ -108,7 +108,7 @@ paths:
           description: User successfully registered.
 
         400:
-          description: Invalid request format, or invalid challenge.
+          description: Invalid request format or any invalid fields in the request.
           content:
             application/json:
               schema:
@@ -123,9 +123,28 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiError'
 
+        403:
+          description: |
+            Server disallows registration, either due to server restriction or
+            unacceptable id_url.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+
         409:
           description: |
             User state changed during the operation. Could retry later.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+
+        422:
+          description: |
+            Fail to process identity description. Could be failure to fetch
+            remote description, unacceptable result from id_url, or any fields
+            (eg. signatures) in the returned description being invalid.
           content:
             application/json:
               schema:
@@ -283,6 +302,13 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiError'
 
+        404:
+          description: |
+            Room does not exist or the user does not have permission to access it.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
 
   /_blah/room/{rid}/admin:
     post:

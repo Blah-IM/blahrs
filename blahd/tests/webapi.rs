@@ -16,7 +16,7 @@ use blah_types::{
     ServerPermission, SignExt, Signed, SignedChatMsg, UserKey, UserRegisterPayload, WithMsgId,
     X_BLAH_DIFFICULTY, X_BLAH_NONCE,
 };
-use blahd::{ApiError, AppState, Database, RoomList, RoomMsgs};
+use blahd::{AppState, Database, RoomList, RoomMsgs};
 use ed25519_dalek::SigningKey;
 use expect_test::expect;
 use futures_util::future::BoxFuture;
@@ -91,33 +91,46 @@ enum NoContent {}
 
 trait ResultExt {
     fn expect_api_err(self, status: StatusCode, code: &str);
+    fn expect_invalid_request(self, message: &str);
 }
 
 impl<T: fmt::Debug> ResultExt for Result<T> {
     #[track_caller]
     fn expect_api_err(self, status: StatusCode, code: &str) {
-        let err = self
-            .unwrap_err()
-            .downcast::<ApiErrorWithHeaders>()
-            .unwrap()
-            .error;
+        let err = self.unwrap_err().downcast::<ApiErrorWithHeaders>().unwrap();
         assert_eq!(
             (err.status, &*err.code),
             (status, code),
-            "unexpecteed API error: {err:?}",
+            "unexpecteed API error: {err}",
+        );
+    }
+
+    #[track_caller]
+    fn expect_invalid_request(self, message: &str) {
+        let err = self.unwrap_err().downcast::<ApiErrorWithHeaders>().unwrap();
+        assert_eq!(
+            (err.status, &*err.code, &*err.message),
+            (StatusCode::BAD_REQUEST, "invalid_request", message),
+            "unexpected API error: {err}"
         );
     }
 }
 
 #[derive(Debug)]
 pub struct ApiErrorWithHeaders {
-    error: ApiError,
+    status: StatusCode,
+    code: String,
+    message: String,
     headers: HeaderMap,
 }
 
 impl fmt::Display for ApiErrorWithHeaders {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.error.fmt(f)
+        write!(
+            f,
+            "status={} code={}: {}",
+            self.status, self.code, self.message,
+        )
     }
 }
 
@@ -193,12 +206,23 @@ impl Server {
             if !status.is_success() {
                 #[derive(Deserialize)]
                 struct Resp {
-                    error: ApiError,
+                    error: RespErr,
                 }
-                let Resp { mut error } = serde_json::from_str(&resp_str)
+                #[derive(Deserialize)]
+                struct RespErr {
+                    code: String,
+                    message: String,
+                }
+
+                let resp = serde_json::from_str::<Resp>(&resp_str)
                     .with_context(|| format!("failed to parse response {resp_str:?}"))?;
-                error.status = status;
-                Err(ApiErrorWithHeaders { error, headers }.into())
+                Err(ApiErrorWithHeaders {
+                    status,
+                    code: resp.error.code,
+                    message: resp.error.message,
+                    headers,
+                }
+                .into())
             } else if resp_str.is_empty() {
                 Ok(None)
             } else {
@@ -336,7 +360,7 @@ impl Server {
             Ok(None) => Ok(()),
             Err(err) => {
                 let err = err.downcast::<ApiErrorWithHeaders>().unwrap();
-                assert_eq!(err.error.status, StatusCode::NOT_FOUND);
+                assert_eq!(err.status, StatusCode::NOT_FOUND);
                 if !err.headers.contains_key(X_BLAH_NONCE) {
                     return Err(None);
                 }
@@ -555,7 +579,7 @@ async fn room_join_leave(server: Server) {
     server
         .join_room(rid_priv, &BOB, MemberPermission::ALL)
         .await
-        .expect_api_err(StatusCode::BAD_REQUEST, "deserialization");
+        .expect_invalid_request("invalid initial permission");
 
     // Bob is joined now.
     assert_eq!(
@@ -626,12 +650,12 @@ async fn room_chat_post_read(server: Server) {
     // Duplicated chat.
     post(rid_pub, chat2.clone())
         .await
-        .expect_api_err(StatusCode::BAD_REQUEST, "duplicated_nonce");
+        .expect_invalid_request("used nonce");
 
     // Wrong room.
     post(rid_pub, chat(rid_priv, &ALICE, "wrong room"))
         .await
-        .expect_api_err(StatusCode::BAD_REQUEST, "invalid_request");
+        .expect_invalid_request("room id mismatch with URI");
 
     // Not a member.
     post(rid_pub, chat(rid_pub, &BOB, "not a member"))
@@ -1066,12 +1090,14 @@ async fn register_flow(server: Server) {
 
     register_fast(&req)
         .await
-        .expect_api_err(StatusCode::BAD_REQUEST, "invalid_server_url");
+        .expect_invalid_request("server url mismatch");
     req.server_url = BASE_URL.parse().unwrap();
 
+    // Trailing dot in id_url.
+    // TODO: Rule this out in `IdUrl` parser?
     register_fast(&req)
         .await
-        .expect_api_err(StatusCode::BAD_REQUEST, "invalid_id_url");
+        .expect_api_err(StatusCode::FORBIDDEN, "disabled");
 
     // Test identity server.
     type DynHandler = Box<dyn FnMut() -> BoxFuture<'static, (StatusCode, String)> + Send>;
@@ -1108,19 +1134,19 @@ async fn register_flow(server: Server) {
 
     register_fast(&req)
         .await
-        .expect_api_err(StatusCode::BAD_REQUEST, "invalid_challenge_nonce");
+        .expect_invalid_request("invalid challenge nonce");
     req.challenge_nonce += 1;
 
     register(sign_with_difficulty(&req, false))
         .await
-        .expect_api_err(StatusCode::BAD_REQUEST, "invalid_challenge_hash");
+        .expect_invalid_request("hash challenge failed");
 
     //// Starting here, early validation passed. ////
 
     // id_url 404
     register(sign_with_difficulty(&req, true))
         .await
-        .expect_api_err(StatusCode::UNAUTHORIZED, "fetch_id_description");
+        .expect_api_err(StatusCode::UNPROCESSABLE_ENTITY, "fetch_id_description");
 
     // Timeout
     set_handler! {{
@@ -1130,7 +1156,7 @@ async fn register_flow(server: Server) {
     let inst = Instant::now();
     register(sign_with_difficulty(&req, true))
         .await
-        .expect_api_err(StatusCode::UNAUTHORIZED, "fetch_id_description");
+        .expect_api_err(StatusCode::UNPROCESSABLE_ENTITY, "fetch_id_description");
     let elapsed = inst.elapsed();
     assert!(
         elapsed.abs_diff(Duration::from_secs(1)) < TIME_TOLERANCE,
@@ -1143,7 +1169,7 @@ async fn register_flow(server: Server) {
     }}
     register(sign_with_difficulty(&req, true))
         .await
-        .expect_api_err(StatusCode::UNAUTHORIZED, "fetch_id_description");
+        .expect_api_err(StatusCode::UNPROCESSABLE_ENTITY, "fetch_id_description");
 
     let set_id_desc = |desc: &UserIdentityDesc| {
         let desc = serde_json::to_string(&desc).unwrap();
@@ -1182,14 +1208,14 @@ async fn register_flow(server: Server) {
     set_id_desc(&id_desc);
     register(sign_with_difficulty(&req, true))
         .await
-        .expect_api_err(StatusCode::UNAUTHORIZED, "invalid_id_description");
+        .expect_api_err(StatusCode::UNPROCESSABLE_ENTITY, "invalid_id_description");
 
     // Still not registered.
     server.get_me(Some(&CAROL)).await.unwrap_err();
     server
         .join_room(rid, &CAROL, MemberPermission::MAX_SELF_ADD)
         .await
-        .expect_api_err(StatusCode::NOT_FOUND, "not_found");
+        .expect_api_err(StatusCode::NOT_FOUND, "user_not_found");
 
     // Finally pass.
     id_desc.profile = sign_profile(req.id_url.clone());
@@ -1257,11 +1283,8 @@ unsafe_allow_id_url_single_label = {allow_single_label}
     let ret = server
         .request::<_, ()>(Method::POST, "/user/me", None, Some(req))
         .await;
-    if !enabled {
-        ret.expect_api_err(StatusCode::FORBIDDEN, "disabled");
-    } else {
-        ret.expect_api_err(StatusCode::BAD_REQUEST, "invalid_id_url");
-    }
+    // Unpermitted due to server restriction.
+    ret.expect_api_err(StatusCode::FORBIDDEN, "disabled");
 }
 
 #[rstest]
