@@ -336,6 +336,30 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiError'
 
+  /_blah/room/{rid}/feed.atom:
+    get:
+      summary: Get Atom feed of room
+      description: |
+        Get room {rid}'s content in The Atom Syndication Format format. The
+        room must be public. For human and feed reader consumption only.
+
+        More details: <https://validator.w3.org/feed/docs/atom.html>
+
+      responses:
+        200:
+          description: The Atom feed.
+          content:
+            application/atom+xml:
+              description: Feed XML.
+
+        404:
+          description: Room does not exist or is private.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+
+
   /_blah/room/{rid}/msg:
     get:
       summary: List messages in a room
