@@ -553,34 +553,22 @@ pub trait TransactionOps {
     }
 
     fn mark_room_msg_seen(&self, rid: Id, uid: i64, cid: Id) -> Result<()> {
-        let max_cid_in_room = prepare_cached_and_bind!(
-            self.conn(),
-            r"
-            SELECT MAX(`cid`)
-            FROM `msg` INDEXED BY `room_latest_msg`
-            WHERE `rid` = :rid
-            "
-        )
-        .raw_query()
-        .next()?
-        .map(|row| row.get(0))
-        .transpose()?
-        .unwrap_or(Id(0));
-        // FIXME: This leaks room existence information.
-        api_ensure!(cid <= max_cid_in_room, "invalid cid");
+        // We should already verify the existence of the room member.
         let updated = prepare_cached_and_bind!(
             self.conn(),
             r"
             UPDATE `room_member`
-            SET `last_seen_cid` = MAX(`last_seen_cid`, :cid)
-            WHERE (`rid`, `uid`) = (:rid, :uid)
+            SET `last_seen_cid` = :cid
+            WHERE (`rid`, `uid`) = (:rid, :uid) AND
+                :cid <= (
+                    SELECT MAX(`cid`)
+                    FROM `msg` INDEXED BY `room_latest_msg`
+                    WHERE `rid` = :rid
+                )
             "
         )
         .raw_execute()?;
-        if updated != 1 {
-            return Err(ApiError::RoomNotFound);
-        }
-
+        api_ensure!(updated == 1, "invalid cid");
         Ok(())
     }
 }
