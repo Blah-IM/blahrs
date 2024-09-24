@@ -317,6 +317,7 @@ dependencies = [
  "expect-test",
  "futures-util",
  "hex",
+ "html-escape",
  "http-body-util",
  "humantime",
  "nix",

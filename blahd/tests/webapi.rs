@@ -726,15 +726,17 @@ async fn room_chat_post_read(server: Server) {
 }
 
 #[rstest]
+#[case::json("json")]
+#[case::atom("atom")]
 #[tokio::test]
-async fn room_feed(server: Server) {
+async fn room_feed(server: Server, #[case] typ: &'static str) {
     // Only public readable rooms provides feed. Not even for public joinable ones.
     let rid_need_join = server
         .create_room(&ALICE, RoomAttrs::PUBLIC_JOINABLE, "not so public")
         .await
         .unwrap();
     server
-        .get::<NoContent>(&format!("/room/{rid_need_join}/feed.json"), None)
+        .get::<NoContent>(&format!("/room/{rid_need_join}/feed.{typ}"), None)
         .await
         .expect_api_err(StatusCode::NOT_FOUND, "room_not_found");
 
@@ -754,30 +756,46 @@ async fn room_feed(server: Server) {
     let cid2 = server.post_chat(rid, &BOB, "b1").await.unwrap().cid;
     server.post_chat(rid, &BOB, "b2").await.unwrap();
 
-    let feed = server
-        .get::<serde_json::Value>(&format!("/room/{rid}/feed.json"), None)
-        .await
-        .unwrap();
-    // TODO: Ideally we should assert on the result, but it contains time and random id currently.
-    assert_eq!(feed["title"].as_str().unwrap(), "public");
-    assert_eq!(feed["items"].as_array().unwrap().len(), 2);
-    let feed_url = format!("{BASE_URL}/_blah/room/{rid}/feed.json");
-    assert_eq!(feed["feed_url"].as_str().unwrap(), feed_url,);
-    assert_eq!(
-        feed["next_url"].as_str().unwrap(),
-        format!("{feed_url}?skipToken={cid2}&top=2"),
-    );
+    if typ == "json" {
+        let feed = server
+            .get::<serde_json::Value>(&format!("/room/{rid}/feed.json"), None)
+            .await
+            .unwrap();
+        // TODO: Ideally we should assert on the result, but it contains time and random id currently.
+        assert_eq!(feed["title"].as_str().unwrap(), "public");
+        assert_eq!(feed["items"].as_array().unwrap().len(), 2);
+        let feed_url = format!("{BASE_URL}/_blah/room/{rid}/feed.json");
+        assert_eq!(feed["feed_url"].as_str().unwrap(), feed_url,);
+        assert_eq!(
+            feed["next_url"].as_str().unwrap(),
+            format!("{feed_url}?skipToken={cid2}&top=2"),
+        );
 
-    let feed2 = server
-        .get::<serde_json::Value>(
-            &format!("/room/{rid}/feed.json?skipToken={cid2}&top=2"),
-            None,
-        )
-        .await
-        .unwrap();
-    let items = feed2["items"].as_array().unwrap();
-    assert_eq!(items.len(), 1);
-    assert_eq!(items[0]["content_html"].as_str().unwrap(), "a");
+        let feed2 = server
+            .get::<serde_json::Value>(
+                &format!("/room/{rid}/feed.json?skipToken={cid2}&top=2"),
+                None,
+            )
+            .await
+            .unwrap();
+        let items = feed2["items"].as_array().unwrap();
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0]["content_html"].as_str().unwrap(), "a");
+    } else {
+        let resp = server
+            .client
+            .get(server.url(format!("/room/{rid}/feed.atom")))
+            .send()
+            .await
+            .unwrap()
+            .error_for_status()
+            .unwrap()
+            .text()
+            .await
+            .unwrap();
+        assert!(resp.starts_with(r#"<?xml version="1.0" encoding="utf-8"?>"#));
+        assert_eq!(resp.matches("<entry>").count(), 2);
+    }
 }
 
 #[rstest]

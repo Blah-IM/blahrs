@@ -17,6 +17,7 @@ use blah_types::{
     X_BLAH_NONCE,
 };
 use database::{Transaction, TransactionOps};
+use feed::FeedData;
 use id::IdExt;
 use middleware::{Auth, MaybeAuth, ResultExt as _, SignedJson};
 use parking_lot::Mutex;
@@ -68,6 +69,9 @@ fn de_base_url<'de, D: Deserializer<'de>>(de: D) -> Result<Url, D::Error> {
         return Err(serde::de::Error::custom(
             "base_url must be able to be a base",
         ));
+    }
+    if url.domain().is_none() {
+        return Err(serde::de::Error::custom("base_url must have a domain"));
     }
     Ok(url)
 }
@@ -137,7 +141,8 @@ pub fn router(st: Arc<AppState>) -> Router {
         .route("/room", get(room_list))
         .route("/room/create", post(room_create))
         .route("/room/:rid", get(room_get_metadata).delete(room_delete))
-        .route("/room/:rid/feed.json", get(room_get_feed))
+        .route("/room/:rid/feed.json", get(room_get_feed::<feed::JsonFeed>))
+        .route("/room/:rid/feed.atom", get(room_get_feed::<feed::AtomFeed>))
         .route("/room/:rid/msg", get(room_msg_list).post(room_msg_post))
         .route("/room/:rid/msg/:cid/seen", post(room_msg_mark_seen))
         .route("/room/:rid/admin", post(room_admin))
@@ -424,7 +429,7 @@ async fn room_get_metadata(
     }))
 }
 
-async fn room_get_feed(
+async fn room_get_feed<FT: feed::FeedType>(
     st: ArcState,
     R(OriginalUri(req_uri), _): RE<OriginalUri>,
     R(Path(rid), _): RE<Path<Id>>,
@@ -470,7 +475,13 @@ async fn room_get_feed(
         next_url
     });
 
-    Ok(feed::to_json_feed(title, msgs, self_url, next_url))
+    Ok(FT::to_feed_response(FeedData {
+        rid,
+        title,
+        msgs,
+        self_url,
+        next_url,
+    }))
 }
 
 /// Get room messages with pagination parameters,

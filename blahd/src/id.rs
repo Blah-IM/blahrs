@@ -5,6 +5,10 @@ use std::time::SystemTime;
 
 use blah_types::Id;
 
+pub fn timestamp_of_id(id: Id) -> u64 {
+    (id.0 as u64 >> 16) / 1000
+}
+
 pub trait IdExt {
     fn gen() -> Self;
     fn gen_peer_chat_rid() -> Self;
