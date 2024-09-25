@@ -5,13 +5,14 @@ use std::time::SystemTime;
 use anyhow::{ensure, Context, Result};
 use blah_types::identity::{IdUrl, UserActKeyDesc, UserIdentityDesc, UserProfile};
 use blah_types::{bitflags, get_timestamp, PubKey, RoomAttrs, ServerPermission, SignExt};
+use clap::value_parser;
 use ed25519_dalek::pkcs8::spki::der::pem::LineEnding;
 use ed25519_dalek::pkcs8::{DecodePrivateKey, DecodePublicKey, EncodePrivateKey};
 use ed25519_dalek::{SigningKey, VerifyingKey};
 use humantime::Duration;
 use rand::thread_rng;
 use reqwest::Url;
-use rusqlite::{prepare_and_bind, Connection};
+use rusqlite::{named_params, prepare_and_bind, Connection};
 use tokio::runtime::Runtime;
 
 const USER_AGENT: &str = concat!("blahctl/", env!("CARGO_PKG_VERSION"));
@@ -182,13 +183,51 @@ impl IdDescArgs {
 enum DbCommand {
     /// Create and initialize database.
     Init,
+    /// Add a new user or update identity and act_keys of an existing user.
+    RegisterUser {
+        #[command(flatten)]
+        user: Box<IdDescArgs>,
+
+        /// User permission.
+        #[arg(long, value_parser = flag_parser::<ServerPermission>)]
+        permission: ServerPermission,
+    },
     /// Set property of an existing user.
     SetUser {
         #[command(flatten)]
         user: Box<User>,
 
+        /// User permission.
         #[arg(long, value_parser = flag_parser::<ServerPermission>)]
         permission: ServerPermission,
+    },
+    /// Create an empty room.
+    CreateRoom {
+        /// Room id.
+        #[arg(long, value_parser = value_parser!(i64).range(0..))]
+        rid: i64,
+
+        /// Room attributes.
+        #[arg(long, value_parser = flag_parser::<RoomAttrs>)]
+        attrs: Option<RoomAttrs>,
+
+        /// Room title.
+        #[arg(long)]
+        title: String,
+    },
+    /// Update attributes of an existing room.
+    SetRoom {
+        /// Room id.
+        #[arg(long, value_parser = value_parser!(i64).range(0..))]
+        rid: i64,
+
+        /// New attributes.
+        #[arg(long, value_parser = flag_parser::<RoomAttrs>)]
+        attrs: Option<RoomAttrs>,
+
+        /// New title.
+        #[arg(long)]
+        title: Option<String>,
     },
 }
 
@@ -426,9 +465,59 @@ fn main_id(cmd: IdCommand) -> Result<()> {
     Ok(())
 }
 
-fn main_db(conn: Connection, command: DbCommand) -> Result<()> {
+fn main_db(mut conn: Connection, command: DbCommand) -> Result<()> {
     match command {
         DbCommand::Init => {}
+        DbCommand::RegisterUser { user, permission } => {
+            let id_desc = user.load(&build_rt()?)?;
+            let fetch_time = get_timestamp();
+            id_desc
+                .verify(user.id_url.as_ref(), fetch_time)
+                .context("invalid identity description")?;
+            let id_desc_json = serde_jcs::to_string(&id_desc).expect("serialization cannot fail");
+            let id_key = &id_desc.id_key;
+            let txn = conn.transaction()?;
+            // TODO: These SQLs (partially?) duplicate with `blahd::database::Database`.
+            let uid = prepare_and_bind!(
+                txn,
+                r"
+                INSERT INTO `user` (`id_key`, `last_fetch_time`, `id_desc`)
+                VALUES (:id_key, :fetch_time, :id_desc_json)
+                ON CONFLICT (`id_key`) DO UPDATE SET
+                    `last_fetch_time` = excluded.`last_fetch_time`,
+                    `id_desc` = excluded.`id_desc`,
+                    `permission` = :permission
+                RETURNING `uid`
+                "
+            )
+            .raw_query()
+            .next()?
+            .expect("should insert or fail")
+            .get::<_, i64>(0)?;
+            prepare_and_bind!(
+                txn,
+                r"
+                DELETE FROM `user_act_key`
+                WHERE `uid` = :uid
+                "
+            )
+            .raw_execute()?;
+            let mut stmt = txn.prepare(
+                r"
+                INSERT INTO `user_act_key` (`uid`, `act_key`, `expire_time`)
+                VALUES (:uid, :act_key, :expire_time)
+                ",
+            )?;
+            for kdesc in &id_desc.act_keys {
+                stmt.execute(named_params! {
+                    ":uid": uid,
+                    ":act_key": kdesc.signee.payload.act_key,
+                    ":expire_time": i64::try_from(kdesc.signee.payload.expire_time).expect("verified timestamp"),
+                })?;
+            }
+            stmt.finalize()?;
+            txn.commit()?;
+        }
         DbCommand::SetUser { user, permission } => {
             let rt = build_rt()?;
             let id_key = user.load(&rt)?;
@@ -441,6 +530,32 @@ fn main_db(conn: Connection, command: DbCommand) -> Result<()> {
                 "
             )
             .raw_execute()?;
+        }
+        DbCommand::CreateRoom { rid, attrs, title } => {
+            assert!(rid >= 0, "checked by clap");
+            let attrs = attrs.unwrap_or_default();
+            prepare_and_bind!(
+                conn,
+                r"
+                INSERT INTO `room` (`rid`, `attrs`, `title`)
+                VALUES (:rid, :attrs, :title)
+                "
+            )
+            .raw_execute()?;
+        }
+        DbCommand::SetRoom { rid, attrs, title } => {
+            assert!(rid >= 0, "checked by clap");
+            let updated = prepare_and_bind!(
+                conn,
+                r"
+                UPDATE `room` SET
+                    `attrs` = COALESCE(:attrs, `attrs`),
+                    `title` = COALESCE(:title, `title`)
+                WHERE `rid` = :rid
+                "
+            )
+            .raw_execute()?;
+            ensure!(updated == 1, "room does not exist");
         }
     }
     Ok(())

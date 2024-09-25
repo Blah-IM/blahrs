@@ -300,6 +300,7 @@ dependencies = [
  "rand",
  "reqwest",
  "rusqlite",
+ "serde_jcs",
  "serde_json",
  "tokio",
 ]
