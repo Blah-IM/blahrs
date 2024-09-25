@@ -32,7 +32,7 @@ sha2 = "0.10"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal", "sync", "time"] }
 tokio-stream = { version = "0.1", features = ["sync"] }
 toml = "0.8"
-tower-http = { version = "0.6", features = ["cors", "limit"] }
+tower-http = { version = "0.6", features = ["cors", "limit", "set-header"] }
 tracing = "0.1"
 tracing-subscriber = "0.3"
 url = { version = "2", features = ["serde"] }
