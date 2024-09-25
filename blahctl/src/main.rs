@@ -10,16 +10,12 @@ use blah_types::{
 };
 use ed25519_dalek::pkcs8::spki::der::pem::LineEnding;
 use ed25519_dalek::pkcs8::{DecodePrivateKey, DecodePublicKey, EncodePrivateKey};
-use ed25519_dalek::{SigningKey, VerifyingKey, PUBLIC_KEY_LENGTH};
+use ed25519_dalek::{SigningKey, VerifyingKey};
 use humantime::Duration;
 use rand::thread_rng;
 use reqwest::Url;
-use rusqlite::{named_params, Connection};
+use rusqlite::{prepare_and_bind, Connection};
 use tokio::runtime::Runtime;
-
-/// NB. Sync with docs of [`User::url`].
-// FIXME: Remove old interface.
-const KEY_URL_SUBPATH: &str = "/.well-known/blah/key";
 
 const USER_AGENT: &str = concat!("blahctl/", env!("CARGO_PKG_VERSION"));
 
@@ -198,7 +194,7 @@ impl IdDescArgs {
 enum DbCommand {
     /// Create and initialize database.
     Init,
-    /// Set user property, possibly adding new users.
+    /// Set property of an existing user.
     SetUser {
         #[command(flatten)]
         user: Box<User>,
@@ -241,52 +237,44 @@ enum ApiCommand {
 // This should be an enum but clap does not support it on `Args` yet.
 // See: https://github.com/clap-rs/clap/issues/2621
 #[derive(Debug, clap::Args)]
-#[clap(group = clap::ArgGroup::new("user").required(true).multiple(false))]
+#[group(required = true, multiple = false)]
 struct User {
     /// Hex-encoded public key.
-    #[arg(long, group = "user", value_parser = userkey_parser)]
-    key: Option<VerifyingKey>,
+    #[arg(long, group = "user")]
+    key: Option<PubKey>,
 
     /// Path to a user public key.
-    #[arg(long, short = 'f', group = "user")]
+    #[arg(long, group = "user")]
     public_key_file: Option<PathBuf>,
 
-    /// User's URL where `/.well-known/blah/key` is hosted.
+    /// The identity URL to check.
+    ///
+    /// It should be a HTTPS domain with a top-level path `/`.
     #[arg(long, group = "user")]
-    url: Option<Url>,
-}
+    id_url: Option<IdUrl>,
 
-fn userkey_parser(s: &str) -> clap::error::Result<VerifyingKey> {
-    (|| {
-        let mut buf = [0u8; PUBLIC_KEY_LENGTH];
-        hex::decode_to_slice(s, &mut buf).ok()?;
-        VerifyingKey::from_bytes(&buf).ok()
-    })()
-    .ok_or_else(|| clap::Error::new(clap::error::ErrorKind::InvalidValue))
+    /// The identity description JSON path to check.
+    #[arg(long, group = "user")]
+    desc_file: Option<PathBuf>,
 }
 
 impl User {
-    async fn fetch_key(&self) -> Result<PubKey> {
-        let rawkey = if let Some(key) = &self.key {
-            return Ok(key.into());
+    fn load(&self, rt: &Runtime) -> Result<PubKey> {
+        if let Some(key) = &self.key {
+            Ok(key.clone())
         } else if let Some(path) = &self.public_key_file {
-            fs::read_to_string(path).context("failed to read key file")?
-        } else if let Some(url) = &self.url {
-            let url = url.join(KEY_URL_SUBPATH)?;
-            build_client()?
-                .get(url)
-                .send()
-                .await?
-                .error_for_status()?
-                .text()
-                .await?
+            let src = fs::read_to_string(path).context("failed to read key file")?;
+            let key = VerifyingKey::from_public_key_pem(&src)
+                .context("invalid key")?
+                .to_bytes();
+            Ok(PubKey(key))
         } else {
-            unreachable!()
-        };
-        let key = VerifyingKey::from_public_key_pem(&rawkey)
-            .context("invalid key")?
-            .to_bytes();
-        Ok(PubKey(key))
+            let args = IdDescArgs {
+                id_url: self.id_url.clone(),
+                desc_file: self.desc_file.clone(),
+            };
+            Ok(args.load(rt)?.id_key)
+        }
     }
 }
 
@@ -455,21 +443,17 @@ fn main_db(conn: Connection, command: DbCommand) -> Result<()> {
     match command {
         DbCommand::Init => {}
         DbCommand::SetUser { user, permission } => {
-            let userkey = build_rt()?.block_on(user.fetch_key())?;
-
-            conn.execute(
+            let rt = build_rt()?;
+            let id_key = user.load(&rt)?;
+            prepare_and_bind!(
+                conn,
                 r"
-                INSERT
-                INTO `user` (`userkey`, `permission`)
-                VALUES (:userkey, :permission)
-                ON CONFLICT (`userkey`) DO UPDATE SET
-                    `permission` = :permission
-                ",
-                named_params! {
-                    ":userkey": userkey,
-                    ":permission": permission,
-                },
-            )?;
+                UPDATE `user`
+                SET `permission` = :permission
+                WHERE `id_key` = :id_key
+                "
+            )
+            .raw_execute()?;
         }
     }
     Ok(())
