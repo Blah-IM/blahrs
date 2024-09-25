@@ -16,7 +16,10 @@ use reqwest::Url;
 use rusqlite::{named_params, prepare_and_bind, Connection};
 use tokio::runtime::Runtime;
 
-const USER_AGENT: &str = concat!("blahctl/", env!("CARGO_PKG_VERSION"));
+const USER_AGENT: fn() -> String = || match option_env!("CFG_RELEASE") {
+    None => concat!("blahctl/", env!("CARGO_PKG_VERSION")).into(),
+    Some(vers) => format!("blahctl/{vers}"),
+};
 
 /// Control or manage Blah Chat Server.
 #[derive(Debug, clap::Parser)]
@@ -337,7 +340,7 @@ fn build_rt() -> Result<Runtime> {
 
 fn build_client() -> Result<reqwest::Client> {
     reqwest::Client::builder()
-        .user_agent(USER_AGENT)
+        .user_agent(USER_AGENT())
         .redirect(reqwest::redirect::Policy::none())
         .build()
         .context("failed to build HTTP client")

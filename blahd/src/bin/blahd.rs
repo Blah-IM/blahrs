@@ -10,7 +10,7 @@ use tokio::signal::unix::{signal, SignalKind};
 
 /// Blah Chat Server
 #[derive(Debug, clap::Parser)]
-#[clap(about, version = option_env!("CFG_RELEASE").unwrap_or(env!("CARGO_PKG_VERSION")))]
+#[clap(about, version = env!("CFG_RELEASE"))]
 enum Cli {
     /// Run the server with given configuration.
     Serve {

@@ -38,6 +38,9 @@ url = { version = "2", features = ["serde"] }
 
 blah-types = { path = "../blah-types", features = ["rusqlite"] }
 
+[build-dependencies]
+url = "2"
+
 [dev-dependencies]
 expect-test = "1"
 nix = { version = "0.29", features = ["fs", "process", "signal"] }

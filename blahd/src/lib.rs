@@ -100,11 +100,7 @@ impl AppState {
     pub fn new(db: Database, config: ServerConfig) -> Self {
         let meta = ServerMetadata {
             server: SERVER_AND_VERSION.into(),
-            // TODO: Validate this at compile time?
-            src_url: SERVER_SRC_URL.map(|url| {
-                url.parse()
-                    .expect("BLAHD_SRC_URL from compile time should be valid")
-            }),
+            src_url: SERVER_SRC_URL.map(|url| url.parse().expect("checked by build script")),
             capabilities: ServerCapabilities {
                 allow_public_register: config.register.enable_public,
             },

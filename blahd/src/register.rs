@@ -15,9 +15,7 @@ use serde::Deserialize;
 use sha2::{Digest, Sha256};
 
 use crate::database::TransactionOps;
-use crate::{ApiError, AppState};
-
-const USER_AGENT: &str = concat!("blahd/", env!("CARGO_PKG_VERSION"));
+use crate::{ApiError, AppState, SERVER_AND_VERSION};
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -94,7 +92,7 @@ impl State {
     pub fn new(config: Config) -> Self {
         // TODO: Audit this.
         let client = reqwest::ClientBuilder::new()
-            .user_agent(USER_AGENT)
+            .user_agent(SERVER_AND_VERSION)
             .redirect(reqwest::redirect::Policy::none())
             .timeout(Duration::from_secs(config.request_timeout_secs))
             .build()
