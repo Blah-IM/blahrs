@@ -1,12 +1,13 @@
 use std::backtrace::Backtrace;
 use std::convert::Infallible;
 use std::fmt;
+use std::str::FromStr;
 use std::sync::Arc;
 
 use axum::extract::rejection::{JsonRejection, PathRejection, QueryRejection};
 use axum::extract::{FromRef, FromRequest, FromRequestParts, Request};
-use axum::http::{header, request, StatusCode};
-use axum::response::{IntoResponse, Response};
+use axum::http::{header, request, HeaderValue, StatusCode};
+use axum::response::{IntoResponse, IntoResponseParts, Response, ResponseParts};
 use axum::{async_trait, Json};
 use blah_types::msg::AuthPayload;
 use blah_types::{Signed, UserKey};
@@ -242,5 +243,44 @@ where
         st.verify_signed_data(&data)
             .map_err(AuthRejection::Invalid)?;
         Ok(Self(data.signee.user))
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct ETag<T>(pub Option<T>);
+
+#[async_trait]
+impl<S, T: FromStr> FromRequestParts<S> for ETag<T>
+where
+    S: Send + Sync,
+{
+    type Rejection = Infallible;
+
+    async fn from_request_parts(
+        parts: &mut request::Parts,
+        _state: &S,
+    ) -> Result<Self, Self::Rejection> {
+        let tag = parts
+            .headers
+            .get(header::IF_NONE_MATCH)
+            .and_then(|v| v.to_str().ok()?.strip_prefix('"')?.strip_suffix('"'))
+            .filter(|s| !s.is_empty())
+            .and_then(|s| s.parse::<T>().ok());
+        Ok(Self(tag))
+    }
+}
+
+impl<T: fmt::Display> IntoResponseParts for ETag<T> {
+    type Error = Infallible;
+
+    fn into_response_parts(self, mut res: ResponseParts) -> Result<ResponseParts, Self::Error> {
+        if let Some(tag) = &self.0 {
+            res.headers_mut().insert(
+                header::ETAG,
+                HeaderValue::from_str(&format!("\"{tag}\""))
+                    .expect("ETag must be a valid header value"),
+            );
+        }
+        Ok(res)
     }
 }

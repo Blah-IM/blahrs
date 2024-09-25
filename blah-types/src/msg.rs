@@ -1,5 +1,7 @@
 //! Core message subtypes.
 use std::fmt;
+use std::num::ParseIntError;
+use std::str::FromStr;
 
 use bitflags_serde_shim::impl_serde_for_bitflags;
 use serde::{de, ser, Deserialize, Serialize};
@@ -19,6 +21,14 @@ pub struct Id(#[serde_as(as = "DisplayFromStr")] pub i64);
 impl fmt::Display for Id {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.0.fmt(f)
+    }
+}
+
+impl FromStr for Id {
+    type Err = ParseIntError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        i64::from_str(s).map(Self)
     }
 }
 

@@ -23,7 +23,7 @@ use blah_types::{get_timestamp, Id, Signed, UserKey};
 use database::{Transaction, TransactionOps};
 use feed::FeedData;
 use id::IdExt;
-use middleware::{Auth, MaybeAuth, ResultExt as _, SignedJson};
+use middleware::{Auth, ETag, MaybeAuth, ResultExt as _, SignedJson};
 use parking_lot::Mutex;
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_inline_default::serde_inline_default;
@@ -434,11 +434,11 @@ async fn room_get_metadata(
 
 async fn room_get_feed<FT: feed::FeedType>(
     st: ArcState,
+    ETag(etag): ETag<Id>,
     R(OriginalUri(req_uri), _): RE<OriginalUri>,
     R(Path(rid), _): RE<Path<Id>>,
     R(Query(mut pagination), _): RE<Query<Pagination>>,
 ) -> Result<Response, ApiError> {
-    // TODO: If-None-Match.
     let self_url = st
         .config
         .base_url
@@ -460,6 +460,12 @@ async fn room_get_feed<FT: feed::FeedType>(
         Ok((title, msgs, skip_token))
     })?;
 
+    // Use `Id(0)` as the tag for an empty list.
+    let ret_etag = msgs.first().map_or(Id(0), |msg| msg.cid);
+    if etag == Some(ret_etag) {
+        return Ok(StatusCode::NOT_MODIFIED.into_response());
+    }
+
     let next_url = skip_token.map(|skip_token| {
         let next_params = Pagination {
             skip_token: Some(skip_token),
@@ -478,13 +484,14 @@ async fn room_get_feed<FT: feed::FeedType>(
         next_url
     });
 
-    Ok(FT::to_feed_response(FeedData {
+    let resp = FT::to_feed_response(FeedData {
         rid,
         title,
         msgs,
         self_url,
         next_url,
-    }))
+    });
+    Ok((ETag(Some(ret_etag)), resp).into_response())
 }
 
 /// Get room messages with pagination parameters,

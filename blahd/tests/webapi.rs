@@ -790,15 +790,60 @@ async fn room_feed(server: Server, #[case] typ: &'static str) {
         .join_room(rid, &BOB, MemberPermission::POST_CHAT)
         .await
         .unwrap();
-    server.post_chat(rid, &ALICE, "a").await.unwrap();
+    let feed_url = server.url(format!("/room/{rid}/feed.{typ}"));
+    let get_feed = |etag: Option<&str>| {
+        let mut req = server.client.get(&feed_url);
+        if let Some(etag) = etag {
+            req = req.header(header::IF_NONE_MATCH, etag);
+        }
+        async move {
+            let resp = req.send().await.unwrap().error_for_status().unwrap();
+            if resp.status() == StatusCode::NOT_MODIFIED {
+                None
+            } else {
+                let etag = resp.headers()[header::ETAG].to_str().unwrap().to_owned();
+                Some((etag, resp.text().await.unwrap()))
+            }
+        }
+    };
+
+    // Empty yet.
+    let etag_zero = "\"0\"";
+    assert_eq!(get_feed(None).await.unwrap().0, etag_zero);
+    // ETag should track from empty -> empty.
+    assert_eq!(get_feed(Some(etag_zero)).await, None);
+
+    // Post some chats.
+    let cid1 = server.post_chat(rid, &ALICE, "a").await.unwrap().cid;
+    // Got some response.
+    let etag_one = format!("\"{cid1}\"");
+    {
+        let resp1 = get_feed(None).await.unwrap();
+        // ETag should track from empty -> non-empty.
+        let resp2 = get_feed(Some(etag_zero)).await.unwrap();
+        // Idempotent.
+        assert_eq!(resp1, resp2);
+        assert_eq!(resp1.0, etag_one);
+    }
+
+    // Post more chats.
     let cid2 = server.post_chat(rid, &BOB, "b1").await.unwrap().cid;
-    server.post_chat(rid, &BOB, "b2").await.unwrap();
+    let cid3 = server.post_chat(rid, &BOB, "b2").await.unwrap().cid;
+
+    let etag_last = format!("\"{cid3}\"");
+    let resp = {
+        let resp1 = get_feed(None).await.unwrap();
+        // ETag should track from non-empty -> non-empty.
+        let resp2 = get_feed(Some(&etag_one)).await.unwrap();
+        // Idempotent.
+        assert_eq!(resp1, resp2);
+        assert_eq!(resp1.0, etag_last);
+        assert_eq!(get_feed(Some(&etag_last)).await, None);
+        resp1.1
+    };
 
     if typ == "json" {
-        let feed = server
-            .get::<serde_json::Value>(&format!("/room/{rid}/feed.json"), None)
-            .await
-            .unwrap();
+        let feed = serde_json::from_str::<serde_json::Value>(&resp).unwrap();
         // TODO: Ideally we should assert on the result, but it contains time and random id currently.
         assert_eq!(feed["title"].as_str().unwrap(), "public");
         assert_eq!(feed["items"].as_array().unwrap().len(), 2);
@@ -820,17 +865,6 @@ async fn room_feed(server: Server, #[case] typ: &'static str) {
         assert_eq!(items.len(), 1);
         assert_eq!(items[0]["content_html"].as_str().unwrap(), "a");
     } else {
-        let resp = server
-            .client
-            .get(server.url(format!("/room/{rid}/feed.atom")))
-            .send()
-            .await
-            .unwrap()
-            .error_for_status()
-            .unwrap()
-            .text()
-            .await
-            .unwrap();
         assert!(resp.starts_with(r#"<?xml version="1.0" encoding="utf-8"?>"#));
         assert_eq!(resp.matches("<entry>").count(), 2);
     }
