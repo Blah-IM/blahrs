@@ -1,12 +1,41 @@
 //! Data types and constants for Chat Server interaction.
 
 use serde::{Deserialize, Serialize};
+use url::Url;
 
 use crate::msg::{Id, MemberPermission, RoomAttrs, SignedChatMsgWithId};
 use crate::PubKey;
 
 pub const X_BLAH_NONCE: &str = "x-blah-nonce";
 pub const X_BLAH_DIFFICULTY: &str = "x-blah-difficulty";
+
+/// Metadata about the version and capabilities of a Chat Server.
+///
+/// It should be relatively stable and do not change very often.
+/// It may contains extra fields and clients should ignore them for future compatibility.
+/// Chat Servers can also include any custom fields here as long they have a `_` prefix.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ServerMetadata {
+    /// A server-defined version string indicating its implementation name and the version.
+    ///
+    /// It is expected to be in form `<server-name>/<server-version>` but not mandatory.
+    pub server: String,
+
+    /// The URL to the source code of the Chat Server.
+    ///
+    /// It is expected to be a public accessible maybe-compressed tarball link without
+    /// access control.
+    pub src_url: Option<Url>,
+
+    /// The server capabilities set.
+    pub capabilities: ServerCapabilities,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ServerCapabilities {
+    /// Whether registration is open to public.
+    pub allow_public_register: bool,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RoomMetadata {

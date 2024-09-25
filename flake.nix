@@ -85,6 +85,7 @@ rec {
           blahd = (pkgs.callPackage mkPkg { }).overrideAttrs {
             # Only set this for the main derivation, not for deps.
             CFG_RELEASE = "git-${rev}";
+            CFG_SRC_URL = "https://github.com/Blah-IM/blahrs/archive/${rev}.tar.gz";
           };
         }
       );

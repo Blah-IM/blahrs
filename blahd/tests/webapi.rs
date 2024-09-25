@@ -15,7 +15,7 @@ use blah_types::msg::{
     MemberPermission, RichText, RoomAdminOp, RoomAdminPayload, RoomAttrs, ServerPermission,
     SignedChatMsg, SignedChatMsgWithId, UserRegisterPayload, WithMsgId,
 };
-use blah_types::server::{RoomMetadata, X_BLAH_DIFFICULTY, X_BLAH_NONCE};
+use blah_types::server::{RoomMetadata, ServerMetadata, X_BLAH_DIFFICULTY, X_BLAH_NONCE};
 use blah_types::{Id, SignExt, Signed, UserKey};
 use blahd::{AppState, Database, RoomList, RoomMsgs};
 use ed25519_dalek::SigningKey;
@@ -245,6 +245,10 @@ impl Server {
         msg.sign_msg(&user.pubkeys.id_key, &user.act_priv).unwrap()
     }
 
+    async fn get_metadata(&self) -> Result<ServerMetadata> {
+        self.get::<ServerMetadata>("/server", None).await
+    }
+
     fn create_room(
         &self,
         user: &User,
@@ -448,6 +452,15 @@ async fn smoke(server: Server) {
         skip_token: None,
     };
     assert_eq!(got, exp);
+}
+
+#[rstest]
+#[tokio::test]
+#[expect(clippy::print_stdout, reason = "allowed in tests for debugging")]
+async fn server_metadata(server: Server) {
+    let meta = server.get_metadata().await.unwrap();
+    println!("{meta:#?}");
+    assert!(meta.server.starts_with("blahd/"));
 }
 
 fn auth(user: &User) -> String {
@@ -1261,6 +1274,10 @@ unsafe_allow_id_url_single_label = {allow_single_label}
         ..Default::default()
     };
     let server = server_with(Database::open(&db_config).unwrap(), &config);
+
+    // Report in capabilities.
+    let meta = server.get_metadata().await.unwrap();
+    assert_eq!(meta.capabilities.allow_public_register, enabled);
 
     // Returns challenge headers only if registration is enabled.
     let hdrs = server.get_me(Some(&CAROL)).await.unwrap_err();

@@ -3,10 +3,11 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Result;
+use axum::body::Bytes;
 use axum::extract::{ws, OriginalUri};
 use axum::extract::{Path, Query, State, WebSocketUpgrade};
-use axum::http::{header, HeaderMap, HeaderName, StatusCode};
-use axum::response::Response;
+use axum::http::{header, HeaderMap, HeaderName, HeaderValue, StatusCode};
+use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use axum_extra::extract::WithRejection as R;
@@ -15,7 +16,9 @@ use blah_types::msg::{
     MemberPermission, RoomAdminOp, RoomAdminPayload, RoomAttrs, ServerPermission,
     SignedChatMsgWithId, UserRegisterPayload,
 };
-use blah_types::server::{RoomMetadata, X_BLAH_DIFFICULTY, X_BLAH_NONCE};
+use blah_types::server::{
+    RoomMetadata, ServerCapabilities, ServerMetadata, X_BLAH_DIFFICULTY, X_BLAH_NONCE,
+};
 use blah_types::{get_timestamp, Id, Signed, UserKey};
 use database::{Transaction, TransactionOps};
 use feed::FeedData;
@@ -40,6 +43,10 @@ mod utils;
 
 pub use database::{Config as DatabaseConfig, Database};
 pub use middleware::ApiError;
+
+/// The server name and version, for metadata report and user agent.
+pub(crate) const SERVER_AND_VERSION: &str = concat!("blahd/", env!("CARGO_PKG_VERSION"));
+const SERVER_SRC_URL: Option<&str> = option_env!("CFG_SRC_URL");
 
 #[serde_inline_default]
 #[derive(Debug, Clone, Deserialize)]
@@ -85,11 +92,27 @@ pub struct AppState {
     event: event::State,
     register: register::State,
 
+    server_metadata: Bytes,
     config: ServerConfig,
 }
 
 impl AppState {
     pub fn new(db: Database, config: ServerConfig) -> Self {
+        let meta = ServerMetadata {
+            server: SERVER_AND_VERSION.into(),
+            // TODO: Validate this at compile time?
+            src_url: SERVER_SRC_URL.map(|url| {
+                url.parse()
+                    .expect("BLAHD_SRC_URL from compile time should be valid")
+            }),
+            capabilities: ServerCapabilities {
+                allow_public_register: config.register.enable_public,
+            },
+        };
+        let server_metadata = serde_json::to_string(&meta)
+            .expect("serialization cannot fail")
+            .into();
+
         Self {
             db,
             used_nonces: Mutex::new(ExpiringSet::new(Duration::from_secs(
@@ -98,6 +121,7 @@ impl AppState {
             event: event::State::default(),
             register: register::State::new(config.register.clone()),
 
+            server_metadata,
             config,
         }
     }
@@ -121,6 +145,7 @@ type ArcState = State<Arc<AppState>>;
 
 pub fn router(st: Arc<AppState>) -> Router {
     let router = Router::new()
+        .route("/server", get(handle_server_metadata))
         .route("/ws", get(handle_ws))
         .route("/user/me", get(user_get).post(user_register))
         .route("/room", get(room_list))
@@ -149,6 +174,18 @@ pub fn router(st: Arc<AppState>) -> Router {
 }
 
 type RE<T> = R<T, ApiError>;
+
+async fn handle_server_metadata(State(st): ArcState) -> Response {
+    // TODO: If-None-Match.
+    (
+        [(
+            header::CONTENT_TYPE,
+            const { HeaderValue::from_static("application/json") },
+        )],
+        st.server_metadata.clone(),
+    )
+        .into_response()
+}
 
 async fn handle_ws(State(st): ArcState, ws: WebSocketUpgrade) -> Response {
     ws.on_upgrade(move |mut socket| async move {
