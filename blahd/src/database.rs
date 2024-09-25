@@ -3,10 +3,12 @@ use std::path::PathBuf;
 
 use anyhow::{ensure, Context};
 use blah_types::identity::UserIdentityDesc;
-use blah_types::{
-    ChatPayload, Id, MemberPermission, PubKey, RoomAttrs, RoomMetadata, ServerPermission,
-    SignedChatMsg, Signee, UserKey, WithMsgId,
+use blah_types::msg::{
+    ChatPayload, MemberPermission, RoomAttrs, ServerPermission, SignedChatMsg, SignedChatMsgWithId,
+    WithMsgId,
 };
+use blah_types::server::RoomMetadata;
+use blah_types::{Id, PubKey, Signee, UserKey};
 use parking_lot::Mutex;
 use rusqlite::{named_params, params, prepare_cached_and_bind, Connection, OpenFlags, Row};
 use serde::Deserialize;
@@ -127,7 +129,7 @@ impl Database {
     }
 }
 
-fn parse_msg(rid: Id, row: &Row<'_>) -> Result<WithMsgId<SignedChatMsg>> {
+fn parse_msg(rid: Id, row: &Row<'_>) -> Result<SignedChatMsgWithId> {
     Ok(WithMsgId {
         cid: row.get("cid")?,
         msg: SignedChatMsg {
@@ -366,7 +368,7 @@ pub trait TransactionOps {
         after_cid: Id,
         before_cid: Id,
         page_len: NonZero<u32>,
-    ) -> Result<Vec<WithMsgId<SignedChatMsg>>> {
+    ) -> Result<Vec<SignedChatMsgWithId>> {
         prepare_cached_and_bind!(
             self.conn(),
             r"

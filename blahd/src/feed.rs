@@ -6,7 +6,8 @@ use std::time::{Duration, SystemTime};
 use axum::http::header;
 use axum::response::{IntoResponse, Response};
 use axum::Json;
-use blah_types::{Id, SignedChatMsg, WithMsgId};
+use blah_types::msg::{SignedChatMsgWithId, WithMsgId};
+use blah_types::Id;
 use serde::{Deserialize, Serialize};
 use url::Url;
 
@@ -32,7 +33,7 @@ impl Default for Config {
 pub struct FeedData {
     pub rid: Id,
     pub title: String,
-    pub msgs: Vec<WithMsgId<SignedChatMsg>>,
+    pub msgs: Vec<SignedChatMsgWithId>,
     pub self_url: Url,
     pub next_url: Option<Url>,
 }

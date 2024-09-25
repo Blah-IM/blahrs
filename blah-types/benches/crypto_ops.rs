@@ -2,9 +2,8 @@
 use std::hint::black_box;
 use std::time::Instant;
 
-use blah_types::{
-    get_timestamp, ChatPayload, Id, PubKey, SignExt, Signee, UserKey, UserRegisterPayload,
-};
+use blah_types::msg::{ChatPayload, UserRegisterPayload};
+use blah_types::{get_timestamp, Id, PubKey, SignExt, Signee, UserKey};
 use criterion::{criterion_group, criterion_main, Criterion};
 use ed25519_dalek::SigningKey;
 use rand::rngs::mock::StepRng;

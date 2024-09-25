@@ -10,12 +10,13 @@ use axum::response::Response;
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use axum_extra::extract::WithRejection as R;
-use blah_types::{
-    get_timestamp, ChatPayload, CreateGroup, CreatePeerChat, CreateRoomPayload, DeleteRoomPayload,
-    Id, MemberPermission, RoomAdminOp, RoomAdminPayload, RoomAttrs, RoomMetadata, ServerPermission,
-    Signed, SignedChatMsg, UserKey, UserRegisterPayload, WithMsgId, X_BLAH_DIFFICULTY,
-    X_BLAH_NONCE,
+use blah_types::msg::{
+    ChatPayload, CreateGroup, CreatePeerChat, CreateRoomPayload, DeleteRoomPayload,
+    MemberPermission, RoomAdminOp, RoomAdminPayload, RoomAttrs, ServerPermission,
+    SignedChatMsgWithId, UserRegisterPayload,
 };
+use blah_types::server::{RoomMetadata, X_BLAH_DIFFICULTY, X_BLAH_NONCE};
+use blah_types::{get_timestamp, Id, Signed, UserKey};
 use database::{Transaction, TransactionOps};
 use feed::FeedData;
 use id::IdExt;
@@ -345,7 +346,7 @@ impl Pagination {
 
 #[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RoomMsgs {
-    pub msgs: Vec<WithMsgId<SignedChatMsg>>,
+    pub msgs: Vec<SignedChatMsgWithId>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub skip_token: Option<Id>,
 }
@@ -460,7 +461,7 @@ fn query_room_msgs(
     txn: &Transaction<'_>,
     rid: Id,
     pagination: Pagination,
-) -> Result<(Vec<WithMsgId<SignedChatMsg>>, Option<Id>), ApiError> {
+) -> Result<(Vec<SignedChatMsgWithId>, Option<Id>), ApiError> {
     let page_len = pagination.effective_page_len(st);
     let msgs = txn.list_room_msgs(
         rid,

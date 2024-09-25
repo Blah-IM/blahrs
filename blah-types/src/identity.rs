@@ -1,6 +1,6 @@
-use core::fmt;
-use std::ops;
+//! User identity description.
 use std::str::FromStr;
+use std::{fmt, ops};
 
 use ed25519_dalek::SignatureError;
 use serde::{Deserialize, Serialize};

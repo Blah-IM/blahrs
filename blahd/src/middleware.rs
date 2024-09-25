@@ -8,7 +8,8 @@ use axum::extract::{FromRef, FromRequest, FromRequestParts, Request};
 use axum::http::{header, request, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::{async_trait, Json};
-use blah_types::{AuthPayload, Signed, UserKey};
+use blah_types::msg::AuthPayload;
+use blah_types::{Signed, UserKey};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 

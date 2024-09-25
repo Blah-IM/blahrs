@@ -10,12 +10,13 @@ use std::time::{Duration, Instant};
 use anyhow::{Context, Result};
 use axum::http::HeaderMap;
 use blah_types::identity::{IdUrl, UserActKeyDesc, UserIdentityDesc, UserProfile};
-use blah_types::{
+use blah_types::msg::{
     AuthPayload, ChatPayload, CreateGroup, CreatePeerChat, CreateRoomPayload, DeleteRoomPayload,
-    Id, MemberPermission, RichText, RoomAdminOp, RoomAdminPayload, RoomAttrs, RoomMetadata,
-    ServerPermission, SignExt, Signed, SignedChatMsg, UserKey, UserRegisterPayload, WithMsgId,
-    X_BLAH_DIFFICULTY, X_BLAH_NONCE,
+    MemberPermission, RichText, RoomAdminOp, RoomAdminPayload, RoomAttrs, ServerPermission,
+    SignedChatMsg, SignedChatMsgWithId, UserRegisterPayload, WithMsgId,
 };
+use blah_types::server::{RoomMetadata, X_BLAH_DIFFICULTY, X_BLAH_NONCE};
+use blah_types::{Id, SignExt, Signed, UserKey};
 use blahd::{AppState, Database, RoomList, RoomMsgs};
 use ed25519_dalek::SigningKey;
 use expect_test::expect;
@@ -329,7 +330,7 @@ impl Server {
         rid: Id,
         user: &User,
         text: &str,
-    ) -> impl Future<Output = Result<WithMsgId<SignedChatMsg>>> + use<'_> {
+    ) -> impl Future<Output = Result<SignedChatMsgWithId>> + use<'_> {
         let msg = self.sign(
             user,
             ChatPayload {

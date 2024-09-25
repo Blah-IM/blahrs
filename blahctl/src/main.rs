@@ -4,7 +4,8 @@ use std::time::SystemTime;
 
 use anyhow::{ensure, Context, Result};
 use blah_types::identity::{IdUrl, UserActKeyDesc, UserIdentityDesc, UserProfile};
-use blah_types::{bitflags, get_timestamp, PubKey, RoomAttrs, ServerPermission, SignExt};
+use blah_types::msg::{RoomAttrs, ServerPermission};
+use blah_types::{bitflags, get_timestamp, PubKey, SignExt};
 use clap::value_parser;
 use ed25519_dalek::pkcs8::spki::der::pem::LineEnding;
 use ed25519_dalek::pkcs8::{DecodePrivateKey, DecodePublicKey, EncodePrivateKey};

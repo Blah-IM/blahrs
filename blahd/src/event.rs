@@ -9,7 +9,8 @@ use std::time::Duration;
 
 use anyhow::{bail, Context as _, Result};
 use axum::extract::ws::{Message, WebSocket};
-use blah_types::{AuthPayload, Signed, SignedChatMsg};
+use blah_types::msg::{AuthPayload, SignedChatMsg};
+use blah_types::Signed;
 use futures_util::future::Either;
 use futures_util::stream::SplitSink;
 use futures_util::{stream_select, SinkExt as _, Stream, StreamExt};
