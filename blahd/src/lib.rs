@@ -20,6 +20,7 @@ use blah_types::server::{
     RoomMetadata, ServerCapabilities, ServerMetadata, X_BLAH_DIFFICULTY, X_BLAH_NONCE,
 };
 use blah_types::{get_timestamp, Id, Signed, UserKey};
+use data_encoding::BASE64_NOPAD;
 use database::{Transaction, TransactionOps};
 use feed::FeedData;
 use id::IdExt;
@@ -27,6 +28,7 @@ use middleware::{Auth, ETag, MaybeAuth, ResultExt as _, SignedJson};
 use parking_lot::Mutex;
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_inline_default::serde_inline_default;
+use sha2::Digest;
 use url::Url;
 use utils::ExpiringSet;
 
@@ -92,7 +94,7 @@ pub struct AppState {
     event: event::State,
     register: register::State,
 
-    server_metadata: Bytes,
+    server_metadata: (Bytes, ETag<Box<str>>),
     config: ServerConfig,
 }
 
@@ -105,9 +107,10 @@ impl AppState {
                 allow_public_register: config.register.enable_public,
             },
         };
-        let server_metadata = serde_json::to_string(&meta)
-            .expect("serialization cannot fail")
-            .into();
+        let meta = Bytes::from(serde_json::to_string(&meta).expect("serialization cannot fail"));
+        let meta_hash = sha2::Sha256::new_with_prefix(&meta).finalize();
+        // Provide 2^-32 collision rate, which is enough for 136yr cache of a  daily update server.
+        let meta_etag = ETag(Some(BASE64_NOPAD.encode(&meta_hash[..8]).into()));
 
         Self {
             db,
@@ -117,7 +120,7 @@ impl AppState {
             event: event::State::default(),
             register: register::State::new(config.register.clone()),
 
-            server_metadata,
+            server_metadata: (meta, meta_etag),
             config,
         }
     }
@@ -172,13 +175,14 @@ pub fn router(st: Arc<AppState>) -> Router {
 type RE<T> = R<T, ApiError>;
 
 async fn handle_server_metadata(State(st): ArcState) -> Response {
-    // TODO: If-None-Match.
+    let (json, etag) = st.server_metadata.clone();
     (
         [(
             header::CONTENT_TYPE,
             const { HeaderValue::from_static("application/json") },
         )],
-        st.server_metadata.clone(),
+        etag,
+        json,
     )
         .into_response()
 }
