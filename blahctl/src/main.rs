@@ -4,10 +4,7 @@ use std::time::SystemTime;
 
 use anyhow::{ensure, Context, Result};
 use blah_types::identity::{IdUrl, UserActKeyDesc, UserIdentityDesc, UserProfile};
-use blah_types::{
-    bitflags, get_timestamp, ChatPayload, CreateGroup, CreateRoomPayload, Id, PubKey, RichText,
-    RoomAttrs, ServerPermission, SignExt,
-};
+use blah_types::{bitflags, get_timestamp, PubKey, RoomAttrs, ServerPermission, SignExt};
 use ed25519_dalek::pkcs8::spki::der::pem::LineEnding;
 use ed25519_dalek::pkcs8::{DecodePrivateKey, DecodePublicKey, EncodePrivateKey};
 use ed25519_dalek::{SigningKey, VerifyingKey};
@@ -42,15 +39,6 @@ enum Command {
 
         #[command(subcommand)]
         command: DbCommand,
-    },
-    /// Access the API endpoint.
-    Api {
-        /// The URL to the API endpoint.
-        #[arg(long)]
-        url: Url,
-
-        #[command(subcommand)]
-        command: ApiCommand,
     },
 }
 
@@ -295,7 +283,6 @@ fn main() -> Result<()> {
                 Connection::open_with_flags(database, flags).context("failed to open database")?;
             main_db(conn, command)?;
         }
-        Command::Api { url, command } => build_rt()?.block_on(main_api(url, command))?,
     }
 
     Ok(())
@@ -462,60 +449,4 @@ fn main_db(conn: Connection, command: DbCommand) -> Result<()> {
 fn load_signing_key(path: &Path) -> Result<SigningKey> {
     let pem = fs::read_to_string(path).context("failed to read private key file")?;
     SigningKey::from_pkcs8_pem(&pem).context("failed to parse private key")
-}
-
-async fn main_api(api_url: Url, command: ApiCommand) -> Result<()> {
-    let client = reqwest::Client::new();
-    match command {
-        ApiCommand::CreateRoom {
-            private_key_file,
-            title,
-            attrs,
-        } => {
-            let key = load_signing_key(&private_key_file)?;
-            let payload = CreateRoomPayload::Group(CreateGroup {
-                attrs: attrs.unwrap_or_default(),
-                title,
-            })
-            // FIXME: Same key.
-            .sign_msg(&key.verifying_key().into(), &key)
-            .expect("serialization cannot fail");
-
-            let ret = client
-                .post(api_url.join("/room/create")?)
-                .json(&payload)
-                .send()
-                .await?
-                .error_for_status()?
-                .text()
-                .await?;
-            println!("{ret}");
-        }
-        ApiCommand::PostChat {
-            private_key_file,
-            room,
-            text,
-        } => {
-            let key = load_signing_key(&private_key_file)?;
-            let payload = ChatPayload {
-                room: Id(room),
-                rich_text: RichText::from(text),
-            }
-            // FIXME: Same key.
-            .sign_msg(&key.verifying_key().into(), &key)
-            .expect("serialization cannot fail");
-
-            let ret = client
-                .post(api_url.join(&format!("/room/{room}/msg"))?)
-                .json(&payload)
-                .send()
-                .await?
-                .error_for_status()?
-                .text()
-                .await?;
-            println!("{ret}");
-        }
-    }
-
-    Ok(())
 }
