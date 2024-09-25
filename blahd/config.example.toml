@@ -41,6 +41,8 @@ max_page_len = 1024
 max_request_len = 4096
 
 # The maximum timestamp tolerance in seconds for request validation.
+# NB. This should be small enough to reject timestamps overflowing `i64`,
+# otherwise it may cause panics.
 timestamp_tolerance_secs = 90
 
 [server.feed]

@@ -1,6 +1,6 @@
 use std::num::NonZero;
 use std::sync::Arc;
-use std::time::{Duration, SystemTime};
+use std::time::Duration;
 
 use anyhow::Result;
 use axum::extract::{ws, OriginalUri};
@@ -11,8 +11,8 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use axum_extra::extract::WithRejection as R;
 use blah_types::{
-    ChatPayload, CreateGroup, CreatePeerChat, CreateRoomPayload, DeleteRoomPayload, Id,
-    MemberPermission, RoomAdminOp, RoomAdminPayload, RoomAttrs, RoomMetadata, ServerPermission,
+    get_timestamp, ChatPayload, CreateGroup, CreatePeerChat, CreateRoomPayload, DeleteRoomPayload,
+    Id, MemberPermission, RoomAdminOp, RoomAdminPayload, RoomAttrs, RoomMetadata, ServerPermission,
     Signed, SignedChatMsg, UserKey, UserRegisterPayload, WithMsgId, X_BLAH_DIFFICULTY,
     X_BLAH_NONCE,
 };
@@ -103,11 +103,7 @@ impl AppState {
 
     fn verify_signed_data<T: Serialize>(&self, data: &Signed<T>) -> Result<(), ApiError> {
         api_ensure!(data.verify().is_ok(), "signature verification failed");
-        let timestamp_diff = SystemTime::now()
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .expect("after UNIX epoch")
-            .as_secs()
-            .abs_diff(data.signee.timestamp);
+        let timestamp_diff = get_timestamp().abs_diff(data.signee.timestamp);
         api_ensure!(
             timestamp_diff <= self.config.timestamp_tolerance_secs,
             "invalid timestamp",

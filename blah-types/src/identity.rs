@@ -29,6 +29,8 @@ pub struct VerifyError(#[from] VerifyErrorImpl);
 enum VerifyErrorImpl {
     #[error("profile id_key mismatch")]
     ProfileIdKeyMismatch,
+    #[error("act_key[{0}] has invalid expiring timestamp")]
+    ActKeyTimestamp(usize),
     #[error("act_key[{0}] not signed by id_key")]
     ActKeySigner(usize),
     #[error("invalid act_key[{0}] signature: {1}")]
@@ -65,6 +67,9 @@ impl UserIdentityDesc {
                 || signed_kdesc.signee.user.act_key != self.id_key
             {
                 return Err(VerifyErrorImpl::ActKeySigner(i).into());
+            }
+            if i64::try_from(kdesc.expire_time).is_err() {
+                return Err(VerifyErrorImpl::ActKeyTimestamp(i).into());
             }
             signed_kdesc
                 .verify()
@@ -333,6 +338,19 @@ mod tests {
         assert_err!(
             id_desc.verify(None, TIMESTAMP),
             VerifyErrorImpl::ActKeySigner(1),
+        );
+
+        // Timestamp overflows i64.
+        id_desc.act_keys[1] = UserActKeyDesc {
+            act_key: act_pub.clone(),
+            expire_time: u64::MAX,
+            comment: String::new(),
+        }
+        .sign_msg_with(&id_key, &id_priv, TIMESTAMP, rng)
+        .unwrap();
+        assert_err!(
+            id_desc.verify(None, TIMESTAMP),
+            VerifyErrorImpl::ActKeyTimestamp(1),
         );
 
         // OK act key.

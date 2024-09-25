@@ -432,8 +432,7 @@ pub trait TransactionOps {
             stmt.execute(named_params! {
                 ":uid": uid,
                 ":act_key": kdesc.signee.payload.act_key,
-                // FIXME: Other `u64` that will be stored in database should also be range checked.
-                ":expire_time": kdesc.signee.payload.expire_time.min(i64::MAX as _),
+                ":expire_time": i64::try_from(kdesc.signee.payload.expire_time).expect("verified timestamp"),
             })?;
         }
 
@@ -537,7 +536,7 @@ pub trait TransactionOps {
     fn add_room_chat_msg(&self, rid: Id, uid: i64, cid: Id, chat: &SignedChatMsg) -> Result<()> {
         let conn = self.conn();
         let act_key = &chat.signee.user.act_key;
-        let timestamp = chat.signee.timestamp;
+        let timestamp = i64::try_from(chat.signee.timestamp).expect("verified timestamp");
         let nonce = chat.signee.nonce;
         let rich_text = &chat.signee.payload.rich_text;
         let sig = &chat.sig;

@@ -1190,7 +1190,7 @@ async fn register_flow(server: Server) {
         // Sign using id_key.
         let act_key = UserActKeyDesc {
             act_key: CAROL.pubkeys.act_key.clone(),
-            expire_time: u64::MAX,
+            expire_time: i64::MAX as _,
             comment: "comment".into(),
         }
         .sign_msg(&CAROL.pubkeys.id_key, &CAROL.id_priv)
