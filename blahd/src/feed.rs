@@ -195,7 +195,7 @@ impl fmt::Display for AtomFeed {
     <author><name>{author}</name></author>
     <content type="html">{esc_content}</content>
   </entry>
-    "#
+"#
             )?;
         }
 

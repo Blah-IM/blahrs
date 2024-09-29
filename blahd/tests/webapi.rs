@@ -763,11 +763,17 @@ async fn room_chat_post_read(server: Server) {
     assert_eq!(msgs, RoomMsgs::default());
 }
 
+#[cfg(feature = "unsafe_use_mock_instant_for_testing")]
 #[rstest]
 #[case::json("json")]
 #[case::atom("atom")]
 #[tokio::test]
 async fn room_feed(server: Server, #[case] typ: &'static str) {
+    use mock_instant::thread_local::MockClock;
+
+    MockClock::set_time(Duration::ZERO);
+    MockClock::set_system_time(Duration::ZERO);
+
     // Only public readable rooms provides feed. Not even for public joinable ones.
     let rid_need_join = server
         .create_room(&ALICE, RoomAttrs::PUBLIC_JOINABLE, "not so public")
@@ -827,7 +833,7 @@ async fn room_feed(server: Server, #[case] typ: &'static str) {
     }
 
     // Post more chats.
-    let cid2 = server.post_chat(rid, &BOB, "b1").await.unwrap().cid;
+    server.post_chat(rid, &BOB, "b1").await.unwrap();
     let cid3 = server.post_chat(rid, &BOB, "b2").await.unwrap().cid;
 
     let etag_last = format!("\"{cid3}\"");
@@ -844,29 +850,102 @@ async fn room_feed(server: Server, #[case] typ: &'static str) {
 
     if typ == "json" {
         let feed = serde_json::from_str::<serde_json::Value>(&resp).unwrap();
-        // TODO: Ideally we should assert on the result, but it contains time and random id currently.
-        assert_eq!(feed["title"].as_str().unwrap(), "public");
-        assert_eq!(feed["items"].as_array().unwrap().len(), 2);
-        let feed_url = format!("{BASE_URL}/_blah/room/{rid}/feed.json");
-        assert_eq!(feed["feed_url"].as_str().unwrap(), feed_url,);
-        assert_eq!(
-            feed["next_url"].as_str().unwrap(),
-            format!("{feed_url}?skipToken={cid2}&top=2"),
-        );
+        let got_pretty = serde_json::to_string_pretty(&feed).unwrap();
+        let expect = expect![[r#"
+            {
+              "feed_url": "http://base.example.com/_blah/room/2/feed.json",
+              "items": [
+                {
+                  "authors": [
+                    {
+                      "name": "2152f8d19b791d24453242e15f2eab6cb7cffa7b6a5ed30097960e069881db12"
+                    }
+                  ],
+                  "content_html": "b2",
+                  "date_published": "1970-01-01T00:00:00Z",
+                  "id": "tag:base.example.com,1970:blah/msg/5"
+                },
+                {
+                  "authors": [
+                    {
+                      "name": "2152f8d19b791d24453242e15f2eab6cb7cffa7b6a5ed30097960e069881db12"
+                    }
+                  ],
+                  "content_html": "b1",
+                  "date_published": "1970-01-01T00:00:00Z",
+                  "id": "tag:base.example.com,1970:blah/msg/4"
+                }
+              ],
+              "next_url": "http://base.example.com/_blah/room/2/feed.json?skipToken=4&top=2",
+              "title": "public",
+              "version": "https://jsonfeed.org/version/1.1"
+            }"#]];
+        expect.assert_eq(&got_pretty);
 
+        let next_url = feed["next_url"]
+            .as_str()
+            .unwrap()
+            .strip_prefix(BASE_URL)
+            .unwrap()
+            .strip_prefix("/_blah")
+            .unwrap();
         let feed2 = server
-            .get::<serde_json::Value>(
-                &format!("/room/{rid}/feed.json?skipToken={cid2}&top=2"),
-                None,
-            )
+            .get::<serde_json::Value>(next_url, None)
             .await
             .unwrap();
-        let items = feed2["items"].as_array().unwrap();
-        assert_eq!(items.len(), 1);
-        assert_eq!(items[0]["content_html"].as_str().unwrap(), "a");
+        let got2_pretty = serde_json::to_string_pretty(&feed2).unwrap();
+
+        expect![[r#"
+            {
+              "feed_url": "http://base.example.com/_blah/room/2/feed.json",
+              "items": [
+                {
+                  "authors": [
+                    {
+                      "name": "db995fe25169d141cab9bbba92baa01f9f2e1ece7df4cb2ac05190f37fcc1f9d"
+                    }
+                  ],
+                  "content_html": "a",
+                  "date_published": "1970-01-01T00:00:00Z",
+                  "id": "tag:base.example.com,1970:blah/msg/3"
+                }
+              ],
+              "title": "public",
+              "version": "https://jsonfeed.org/version/1.1"
+            }"#]]
+        .assert_eq(&got2_pretty);
     } else {
         assert!(resp.starts_with(r#"<?xml version="1.0" encoding="utf-8"?>"#));
-        assert_eq!(resp.matches("<entry>").count(), 2);
+
+        expect![[r#"
+            <?xml version="1.0" encoding="utf-8"?>
+            <feed xmlns="http://www.w3.org/2005/Atom">
+              <id>tag:base.example.com,1970:blah/room/2</id>
+              <title>public</title>
+              <updated>1970-01-01T00:00:00Z</updated>
+              <link rel="self" type="application/atom+xml" href="http://base.example.com/_blah/room/2/feed.atom"/>
+              <link rel="next" type="application/atom+xml" href="http://base.example.com/_blah/room/2/feed.atom?skipToken=4&amp;top=2"/>
+
+              <entry>
+                <id>tag:base.example.com,1970:blah/msg/5</id>
+                <title type="text">b2</title>
+                <published>1970-01-01T00:00:00Z</published>
+                <updated>1970-01-01T00:00:00Z</updated>
+                <author><name>2152f8d19b791d24453242e15f2eab6cb7cffa7b6a5ed30097960e069881db12</name></author>
+                <content type="html">b2</content>
+              </entry>
+
+              <entry>
+                <id>tag:base.example.com,1970:blah/msg/4</id>
+                <title type="text">b1</title>
+                <published>1970-01-01T00:00:00Z</published>
+                <updated>1970-01-01T00:00:00Z</updated>
+                <author><name>2152f8d19b791d24453242e15f2eab6cb7cffa7b6a5ed30097960e069881db12</name></author>
+                <content type="html">b1</content>
+              </entry>
+
+            </feed>
+        "#]].assert_eq(&resp);
     }
 }
 
@@ -1337,6 +1416,84 @@ unsafe_allow_id_url_single_label = {allow_single_label}
         .await;
     // Unpermitted due to server restriction.
     ret.expect_api_err(StatusCode::FORBIDDEN, "disabled");
+}
+
+#[cfg(feature = "unsafe_use_mock_instant_for_testing")]
+#[rstest]
+#[tokio::test]
+async fn register_nonce() {
+    use mock_instant::thread_local::MockClock;
+
+    // Matches the config below.
+    const NONCE_PERIOD: Duration = Duration::from_secs(10);
+
+    let config = |_port| {
+        format!(
+            r#"
+base_url="{BASE_URL}"
+[register]
+enable_public = true
+difficulty = 64 # Should fail the challenge if nonce matches.
+nonce_rotate_secs = 10
+unsafe_allow_id_url_http = true
+        "#
+        )
+    };
+    let db_config = blahd::DatabaseConfig {
+        in_memory: true,
+        ..Default::default()
+    };
+    MockClock::set_time(Duration::ZERO);
+    let server = server_with(Database::open(&db_config).unwrap(), &config);
+    // Avoid hitting the period boundary.
+    MockClock::advance(Duration::from_secs(1));
+
+    let (nonce0, _diff) = server.get_me(Some(&CAROL)).await.unwrap_err().unwrap();
+
+    let register = |nonce: u32, expect_ok| {
+        let req = UserRegisterPayload {
+            id_key: CAROL.pubkeys.id_key.clone(),
+            server_url: BASE_URL.parse().unwrap(),
+            id_url: BASE_URL.parse().unwrap(),
+            challenge_nonce: nonce,
+        }
+        .sign_msg(&CAROL.pubkeys.id_key, &CAROL.act_priv)
+        .unwrap();
+        let expect_err = if expect_ok {
+            "hash challenge failed"
+        } else {
+            "invalid challenge nonce"
+        };
+        async {
+            server
+                .request::<_, ()>(Method::POST, "/user/me", None, Some(req))
+                .await
+                .expect_invalid_request(expect_err);
+        }
+    };
+
+    // Valid nonce.
+    register(nonce0, true).await;
+
+    // After one nonce period, a new nonce is generated.
+    MockClock::advance(NONCE_PERIOD);
+    let (nonce1, _diff) = server.get_me(Some(&CAROL)).await.unwrap_err().unwrap();
+    assert_ne!(nonce0, nonce1);
+
+    // Both nonce are valid yet, because it's in the grace period.
+    register(nonce0, true).await;
+    register(nonce1, true).await;
+
+    // After one period, another new nonce is generated.
+    MockClock::advance(NONCE_PERIOD);
+    let (nonce2, _diff) = server.get_me(Some(&CAROL)).await.unwrap_err().unwrap();
+    assert_ne!(nonce0, nonce2);
+    assert_ne!(nonce1, nonce2);
+
+    // The oldest nonce expired. The last two noncesa re valid.
+    register(nonce0, false).await;
+    register(nonce1, true).await;
+    register(nonce2, true).await;
 }
 
 #[rstest]
