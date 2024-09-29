@@ -4,6 +4,28 @@ info:
   version: 0.0.1
 
 paths:
+  /_blah/server:
+    get:
+      summary: Get Server metadata
+      responses:
+        200:
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  server:
+                    type: string
+                    example: 'blah/0.0.0'
+                  src_url:
+                    type: string
+                    example: 'https://github.com/Blah-IM/blahrs'
+                  capabilities:
+                    type: object
+                    properties:
+                      allow_public_register:
+                        type: boolean
+
   # OAPI does not support WebSocket interface definitions.
   # See: https://github.com/OAI/OpenAPI-Specification/issues/55#issuecomment-929382279
   /_blah/ws:
