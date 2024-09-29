@@ -134,7 +134,7 @@ macro_rules! define_from_deser_rejection {
         $(
             impl From<$ty> for ApiError {
                 fn from(rej: $ty) -> Self {
-                    ApiError::InvalidRequest(format!(concat!("invalid ", $name, "{}"), rej).into())
+                    ApiError::InvalidRequest(format!(concat!("invalid ", $name, ": {}"), rej).into())
                 }
             }
         )*
