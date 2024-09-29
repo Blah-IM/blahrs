@@ -276,6 +276,7 @@ dependencies = [
  "expect-test",
  "hex",
  "html-escape",
+ "mock_instant",
  "rand",
  "rusqlite",
  "serde",
@@ -322,6 +323,7 @@ dependencies = [
  "html-escape",
  "http-body-util",
  "humantime",
+ "mock_instant",
  "nix",
  "parking_lot",
  "paste",
@@ -1319,6 +1321,12 @@ dependencies = [
  "wasi",
  "windows-sys 0.52.0",
 ]
+
+[[package]]
+name = "mock_instant"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cdcebb6db83796481097dedc7747809243cc81d9ed83e6a938b76d4ea0b249cf"
 
 [[package]]
 name = "native-tls"

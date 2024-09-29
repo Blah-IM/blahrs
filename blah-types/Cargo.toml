@@ -3,6 +3,10 @@ name = "blah-types"
 version = "0.0.0"
 edition = "2021"
 
+[features]
+default = []
+unsafe_use_mock_instant_for_testing = ["dep:mock_instant"]
+
 [[bench]]
 name = "crypto_ops"
 harness = false
@@ -13,6 +17,7 @@ bitflags_serde_shim = "0.2"
 ed25519-dalek = "2"
 hex = { version = "0.4", features = ["serde"] }
 html-escape = "0.2"
+mock_instant = { version = "0.5", optional = true }
 rand = "0.8"
 rusqlite = { version = "0.32", optional = true }
 serde = { version = "1", features = ["derive"] }

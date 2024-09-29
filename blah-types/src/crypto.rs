@@ -2,7 +2,6 @@
 
 use std::fmt;
 use std::str::FromStr;
-use std::time::SystemTime;
 
 use ed25519_dalek::{
     Signature, SignatureError, Signer, SigningKey, VerifyingKey, PUBLIC_KEY_LENGTH,
@@ -104,6 +103,12 @@ impl<T: Serialize> SignExt for T {
 }
 
 pub fn get_timestamp() -> u64 {
+    #[cfg(not(feature = "unsafe_use_mock_instant_for_testing"))]
+    use std::time::SystemTime;
+
+    #[cfg(feature = "unsafe_use_mock_instant_for_testing")]
+    use mock_instant::thread_local::SystemTime;
+
     SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
         .expect("after UNIX epoch")

@@ -1,9 +1,11 @@
+use std::cell::Cell;
+
 /// Id generation.
 /// Ref: https://en.wikipedia.org/wiki/Snowflake_ID
-/// FIXME: Currently we assume no more than one request in a single millisecond.
-use std::time::SystemTime;
-
+/// FIXME: Handle multi-threaded runtime.
 use blah_types::Id;
+
+use crate::utils::SystemTime;
 
 pub fn timestamp_of_id(id: Id) -> u64 {
     (id.0 as u64 >> 16) / 1000
@@ -16,17 +18,32 @@ pub trait IdExt {
     fn is_peer_chat(&self) -> bool;
 }
 
+thread_local! {
+    static LAST_ID: Cell<i64> = const { Cell::new(0) };
+}
+
 impl IdExt for Id {
     fn gen() -> Self {
         let timestamp = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
             .expect("after UNIX epoch");
         let timestamp_ms = timestamp.as_millis();
-        assert!(
-            0 < timestamp_ms && timestamp_ms < (1 << 48),
-            "invalid timestamp",
-        );
-        Id((timestamp_ms as i64) << 16)
+        assert!(timestamp_ms < (1 << 48), "invalid timestamp");
+        let timestamp_ms = timestamp_ms as i64;
+        let id = timestamp_ms << 16;
+        LAST_ID.with(|last_id| {
+            let prev = last_id.get();
+            if prev >> 16 != timestamp_ms {
+                // If not in the same millisecond, use the new timestamp as id.
+                last_id.set(id);
+                Id(id)
+            } else {
+                // Otherwise, try to increse the trailing counter.
+                assert!(prev < (1 << 16), "id counter overflow");
+                last_id.set(prev + 1);
+                Id(prev + 1)
+            }
+        })
     }
 
     fn gen_peer_chat_rid() -> Self {

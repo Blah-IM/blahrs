@@ -1,7 +1,7 @@
 //! Room feed generation.
 use std::fmt;
 use std::num::NonZero;
-use std::time::{Duration, SystemTime};
+use std::time::Duration;
 
 use axum::http::header;
 use axum::response::{IntoResponse, Response};
@@ -43,7 +43,8 @@ pub trait FeedType {
 }
 
 fn timestamp_to_rfc3339(timestamp: u64) -> impl fmt::Display {
-    humantime::format_rfc3339(SystemTime::UNIX_EPOCH + Duration::from_secs(timestamp))
+    // This only for formatting, thus always use the non-mock `SystemTime`.
+    humantime::format_rfc3339(std::time::SystemTime::UNIX_EPOCH + Duration::from_secs(timestamp))
 }
 
 /// See:

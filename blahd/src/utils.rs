@@ -1,6 +1,12 @@
 use std::collections::{HashSet, VecDeque};
 use std::hash::Hash;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+
+#[cfg(not(feature = "unsafe_use_mock_instant_for_testing"))]
+pub use std::time::{Instant, SystemTime};
+
+#[cfg(feature = "unsafe_use_mock_instant_for_testing")]
+pub use mock_instant::thread_local::{Instant, SystemTime};
 
 #[derive(Debug)]
 pub struct ExpiringSet<T> {

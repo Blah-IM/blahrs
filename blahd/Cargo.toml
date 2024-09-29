@@ -3,6 +3,10 @@ name = "blahd"
 version = "0.0.0"
 edition = "2021"
 
+[features]
+default = []
+unsafe_use_mock_instant_for_testing = ["dep:mock_instant", "blah-types/unsafe_use_mock_instant_for_testing"]
+
 [dependencies]
 anyhow = "1"
 axum = { version = "0.7", features = ["ws"] }
@@ -15,6 +19,7 @@ hex = { version = "0.4", features = ["serde"] }
 html-escape = "0.2"
 http-body-util = "0.1"
 humantime = "2"
+mock_instant = { version = "0.5", optional = true }
 parking_lot = "0.12" # Maybe no better performance, just that we hate poisoning. ¯\_(ツ)_/¯
 paste = "1.0.15"
 rand = "0.8"
