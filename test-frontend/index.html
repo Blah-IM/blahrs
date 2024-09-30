@@ -2,86 +2,147 @@
 <html>
   <head>
     <meta charset="utf-8">
-    <title>poc</title>
+    <title>Blah testing frontend</title>
     <script src="./main.js" defer></script>
     <style>
+      @media screen and (max-width: 50em) {
+        body {
+          flex-direction: column;
+        }
+        #sidebar {
+          width: auto !important;
+          border-bottom: 1px solid grey;
+          border-right: none !important;
+          flex: .5;
+        }
+      }
+
+      input, select {
+        min-width: 0;
+      }
+
       body {
         display: flex;
-        flex-direction: column;
         height: 100vh;
         margin: 0;
         font-family: monospace;
       }
-      #msg-flow {
+
+      input {
+        text-overflow: ellipsis;
+      }
+
+      #sidebar {
+        padding: .5em;
+        width: 25em;
+        display: flex;
+        flex-direction: column;
+        border-right: 1px solid grey;
+        & label {
+          margin-left: 0;
+        }
+        & > #rooms {
+          flex: 1;
+        }
+      }
+
+      .label-input {
+        display: flex;
+        flex-direction: row;
+        & > label {
+          margin: auto .5em;
+        }
+        & > input, & > select {
+          flex: 1;
+        }
+      }
+
+      #mainbar {
         flex: 1;
-        overflow: scroll;
+        display: flex;
+        flex-direction: column;
+
+        & > .flow {
+          padding: .5em;
+          overflow: scroll;
+          border-bottom: 1px solid grey;
+          & > * {
+            display: block;
+          }
+        }
       }
-      #msg-flow > * {
-        display: block;
+      #log-flow {
+        flex: 1;
       }
+      #msg-flow {
+        flex: 2;
+      }
+
       .log {
         margin: auto;
         font-style: italic;
         &::before {
-            content: "«";
+          content: "«";
         }
         &::after {
-            content: "»";
-        }
-      }
-
-      #input-area > * {
-        display: flex;
-        flex-direction: row;
-        & > label {
-            margin: auto;
-        }
-        & > input,
-        & > select {
-            flex: 1;
+          content: "»";
         }
       }
     </style>
   </head>
 
   <body>
-    <div id="msg-flow">
-      <span class="log">please enter room url below and press ENTER</span>
-    </div>
-    <div id="input-area">
-      <div>
-        <label for="id-pubkey">id_pubkey:</label>
+    <div id="sidebar">
+      <div class="label-input">
+        <label for="id-url">id_url:</label>
+        <input type="url" id="id-url" placeholder="https://example.com" />
+        <button id="register">register</button>
+      </div>
+      <div class="label-input">
+        <label for="id-pubkey">id_pubkey :</label>
         <input type="text" id="id-pubkey" placeholder="-" />
+      </div>
+      <div class="label-input">
         <label for="act-pubkey">act_pubkey:</label>
-        <input type="text" id="act-pubkey" placeholder="-" readonly />
+        <input type="text" id="act-pubkey" placeholder="-" readonly disabled />
         <button id="regen-key">regenerate</button>
       </div>
-      <div>
+
+      <div class="label-input">
         <label for="server-url">server url:</label>
         <input
             type="url"
             id="server-url"
             placeholder="https://example.com"
-            pattern="https://.*"
+            pattern="https:\/\/[^\/]*\/?"
             required
             />
-        <button id="register">register</button>
       </div>
-      <div>
-        <label for="rooms">joined rooms:</label>
-        <select id="rooms"></select>
 
-        <label for="join-new-room">join public room:</label>
+      <div>
+        <label for="rooms">rooms:</label>
+        <button id="refresh-rooms">refresh room list</button>
+      </div>
+      <select id="rooms" size="2"></select>
+      <div class="label-input">
+        <label for="join-new-room">join new room:</label>
         <select id="join-new-room"></select>
-
-        <button id="leave-room">leave room</select>
-        <button id="refresh-rooms">refresh room list</select>
       </div>
-      <div>
-        <label for="chat">chat:</label>
-        <input type="text" id="chat" placeholder="message" />
+    </div>
 
+    <div id="mainbar">
+      <div id="log-flow" class="flow">
+        <noscript>
+          <span class="log">javascript is required</span>
+        </noscript>
+      </div>
+      <div id="msg-flow" class="flow">
+      </div>
+      <div class="label-input">
+        <label for="chat">chat:</label>
+        <input type="text" id="chat" placeholder="message or raw JSON" />
         <button id="mark-seen">mark history seen</button>
+        <button id="leave-room">leave room</button>
       </div>
     </div>
   </body>

@@ -1,3 +1,5 @@
+const idUrlInput = document.querySelector('#id-url');
+const logFlow = document.querySelector('#log-flow');
 const msgFlow = document.querySelector('#msg-flow');
 const idPubkeyInput = document.querySelector('#id-pubkey');
 const actPubkeyDisplay = document.querySelector('#act-pubkey');
@@ -36,10 +38,10 @@ async function getActPubkey() {
     return bufToHex(await crypto.subtle.exportKey('raw', keypair.publicKey));
 }
 
-function appendMsg(el) {
-    msgFlow.append(el);
-    msgFlow.scrollTo({
-        top: msgFlow.scrollTopMax,
+function appendMsg(parent, el) {
+    parent.append(el);
+    parent.scrollTo({
+        top: parent.scrollTopMax,
         behavior: 'instant',
     })
 }
@@ -52,7 +54,7 @@ function log(msg, isHtml) {
     } else {
         el.innerText = msg;
     }
-    appendMsg(el)
+    appendMsg(logFlow, el)
 }
 
 async function loadKeypair() {
@@ -114,8 +116,18 @@ async function register() {
     }
 
     try {
-        const idUrl = prompt('id_url:', defaultConfig.id_url || '');
-        if (idUrl === null) return;
+        const idUrl = idUrlInput.value.trim();
+        if (idUrl === '') return;
+
+        const wellKnownUrl = (new URL(idUrl)) + '.well-known/blah/identity.json';
+        log(`fetching ${wellKnownUrl}`);
+        const idDescResp = await fetch(wellKnownUrl, { redirect: 'error' });
+        if (idDescResp.status !== 200) throw new Error(`status ${idDescResp.status}`);
+        const idDescJson = await idDescResp.json()
+        if (typeof idDescJson.id_key !== 'string' || idDescJson.id_key.length !== 64) {
+            throw new Error('invalid id_key from identity description response');
+        }
+        idPubkeyInput.value = idDescJson.id_key;
 
         const getResp = await fetch(`${apiUrl}/user/me`, {
             cache: 'no-store'
@@ -124,6 +136,7 @@ async function register() {
         const difficulty = parseInt(getResp.headers.get('x-blah-difficulty'));
         if (challenge === null) throw new Error('cannot get challenge nonce');
 
+        log('solving challenge')
         const postResp = await signAndPost(`${apiUrl}/user/me`, {
             // sorted fields.
             challenge_nonce: challenge,
@@ -170,7 +183,7 @@ async function showChatMsg(chat) {
     elContent.innerHTML = richTextToHtml(chat.signee.payload.rich_text);
     el.appendChild(elHeader);
     el.appendChild(elContent);
-    appendMsg(el)
+    appendMsg(msgFlow, el)
 }
 
 function richTextToHtml(richText) {
@@ -218,33 +231,36 @@ async function enterRoom(rid) {
     curRoom = rid;
     roomsInput.value = rid;
 
-    genAuthHeader()
-    .then(opts => fetch(`${apiUrl}/room/${rid}`, opts))
-    .then(async (resp) => [resp.status, await resp.json()])
-    .then(async ([status, json]) => {
-        if (status !== 200) throw new Error(`status ${status}: ${json.error.message}`);
-        document.title = `room: ${json.title}`
-    })
-    .catch((e) => {
-        log(`failed to get room metadata: ${e}`);
-    });
+    msgFlow.replaceChildren();
 
-    genAuthHeader()
-    .then(opts => fetch(`${apiUrl}/room/${rid}/msg`, opts))
-    .then(async (resp) => { return [resp.status, await resp.json()]; })
-    .then(async ([status, json]) => {
-        if (status !== 200) throw new Error(`status ${status}: ${json.error.message}`);
+    let roomMetadata;
+    try {
+        const resp = await fetch(`${apiUrl}/room/${rid}`, await genAuthHeader());
+        roomMetadata = await resp.json();
+        if (resp.status !== 200) throw new Error(`status ${resp.status}: ${roomMetadata.error.message}`);
+        document.title = `Blah: ${roomMetadata.title}`;
+    } catch (err) {
+        log(`failed to get room metadata: ${err}`);
+    }
+
+    try {
+        const resp = await fetch(`${apiUrl}/room/${rid}/msg`, await genAuthHeader());
+        const json = await resp.json();
+        if (resp.status !== 200) throw new Error(`status ${resp.status}: ${json.error.message}`);
         const { msgs } = json
         msgs.reverse();
         for (const msg of msgs) {
             lastCid = msg.cid;
             await showChatMsg(msg);
+            if (msg.cid === roomMetadata.last_seen_cid) {
+                const el = document.createElement('span');
+                el.innerText = '---last seen---';
+                appendMsg(msgFlow, el)
+            }
         }
-        log('---history---');
-    })
-    .catch((e) => {
-        log(`failed to fetch history: ${e}`);
-    });
+    } catch (err) {
+        log(`failed to fetch history: ${err}`);
+    }
 }
 
 async function connectServer(newServerUrl) {
@@ -366,7 +382,7 @@ async function leaveRoom() {
         await signAndPost(`${apiUrl}/room/${curRoom}/admin`, {
             room: curRoom,
             typ: 'remove_member',
-            user: await getActPubkey(),
+            user: await getIdPubkey(),
         });
         log('left room');
         await loadRoomList(true);
@@ -486,6 +502,9 @@ window.onload = async (_) => {
     if (keypair !== null) {
         actPubkeyDisplay.value = await getActPubkey();
     }
+    if (idUrlInput.value === '' && defaultConfig.id_url) {
+        idUrlInput.value = defaultConfig.id_url;
+    }
     if (idPubkeyInput.value === '' && defaultConfig.id_key) {
         idPubkeyInput.value = defaultConfig.id_key;
     }
@@ -520,6 +539,7 @@ serverUrlInput.onchange = async (e) => {
 chatInput.onkeypress = async (e) => {
     if (e.key === 'Enter') {
         await postChat(chatInput.value);
+        chatInput.focus();
     }
 };
 roomsInput.onchange = async (_) => {
