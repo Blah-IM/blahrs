@@ -34,8 +34,8 @@ macro_rules! define_api_error {
         }
 
         impl $name {
-            fn to_response_tuple(&self) -> (StatusCode, &'static str, &str) {
-                paste::paste! {
+            pub fn to_raw(&self) -> (StatusCode, RawApiError<'_>) {
+                let (status, code, message): (StatusCode, &str, &str) = paste::paste! {
                     match self {
                         $(
                             Self::$variant
@@ -44,7 +44,8 @@ macro_rules! define_api_error {
                                 ,
                         )*
                     }
-                }
+                };
+                (status, RawApiError { code, message })
             }
         }
 
@@ -75,6 +76,12 @@ pub enum ApiError {
 
 }
 
+#[derive(Debug, Serialize)]
+pub struct RawApiError<'a> {
+    pub code: &'a str,
+    pub message: &'a str,
+}
+
 macro_rules! api_ensure {
     ($assertion:expr, $msg:literal $(,)?) => {
         if !$assertion {
@@ -95,19 +102,11 @@ impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
         #[derive(Serialize)]
         struct Resp<'a> {
-            error: Error<'a>,
-        }
-        #[derive(Serialize)]
-        struct Error<'a> {
-            code: &'a str,
-            message: &'a str,
+            error: RawApiError<'a>,
         }
 
-        let (status, code, message) = self.to_response_tuple();
-        let mut resp = Json(Resp {
-            error: Error { code, message },
-        })
-        .into_response();
+        let (status, error) = self.to_raw();
+        let mut resp = Json(Resp { error }).into_response();
         *resp.status_mut() = status;
         resp
     }
@@ -115,7 +114,7 @@ impl IntoResponse for ApiError {
 
 impl fmt::Display for ApiError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let (_, code, message) = self.to_response_tuple();
+        let RawApiError { code, message } = self.to_raw().1;
         write!(f, "({code}) {message}")
     }
 }

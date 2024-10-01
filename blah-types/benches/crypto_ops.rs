@@ -2,7 +2,7 @@
 use std::hint::black_box;
 use std::time::Instant;
 
-use blah_types::msg::{ChatPayload, UserRegisterPayload};
+use blah_types::msg::{ChatPayload, UserRegisterChallengeResponse, UserRegisterPayload};
 use blah_types::{get_timestamp, Id, PubKey, SignExt, Signee, UserKey};
 use criterion::{criterion_group, criterion_main, Criterion};
 use ed25519_dalek::SigningKey;
@@ -24,7 +24,7 @@ fn bench_register_pow(c: &mut Criterion) {
         id_key: id_key.clone(),
         server_url: "http://some.example.com".parse().unwrap(),
         id_url: "http://another.example.com".parse().unwrap(),
-        challenge_nonce: rng.gen(),
+        challenge: Some(UserRegisterChallengeResponse::Pow { nonce: rng.gen() }),
     };
     let mut signee = Signee {
         nonce: 0,

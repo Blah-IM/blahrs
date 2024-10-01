@@ -132,14 +132,28 @@ async function register() {
         const getResp = await fetch(`${apiUrl}/user/me`, {
             cache: 'no-store'
         })
-        const challenge = parseInt(getResp.headers.get('x-blah-nonce'));
-        const difficulty = parseInt(getResp.headers.get('x-blah-difficulty'));
-        if (challenge === null) throw new Error('cannot get challenge nonce');
+        if (getResp.status === 204) {
+            log('already registered');
+            return;
+        }
+        const getRespJson = await getResp.json();
+        if (getResp.status !== 404) {
+            throw new Error(`failed to get user info, status ${getResp.status}: ${getRespJson.error.message}`);
+        }
+        const challenge_nonce = getRespJson?.register_challenge?.pow?.nonce;
+        if (!challenge_nonce) {
+            throw new Error(`cannot get challenge nonce: ${getRespJson.error.message}`);
+        }
+        const difficulty = getRespJson.register_challenge.pow.difficulty;
 
         log('solving challenge')
         const postResp = await signAndPost(`${apiUrl}/user/me`, {
             // sorted fields.
-            challenge_nonce: challenge,
+            challenge: {
+                pow: {
+                    nonce: challenge_nonce,
+                },
+            },
             id_key: getIdPubkey(),
             id_url: norm(idUrl),
             server_url: norm(apiUrl.replace(/\/_blah\/?$/, '')),

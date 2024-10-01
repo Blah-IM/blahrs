@@ -6,7 +6,7 @@ use anyhow::Result;
 use axum::body::Bytes;
 use axum::extract::{ws, OriginalUri};
 use axum::extract::{Path, Query, State, WebSocketUpgrade};
-use axum::http::{header, HeaderMap, HeaderName, HeaderValue, StatusCode};
+use axum::http::{header, HeaderName, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
@@ -16,15 +16,13 @@ use blah_types::msg::{
     MemberPermission, RoomAdminOp, RoomAdminPayload, RoomAttrs, ServerPermission,
     SignedChatMsgWithId, UserRegisterPayload,
 };
-use blah_types::server::{
-    RoomMetadata, ServerCapabilities, ServerMetadata, X_BLAH_DIFFICULTY, X_BLAH_NONCE,
-};
+use blah_types::server::{RoomMetadata, ServerCapabilities, ServerMetadata, UserRegisterChallenge};
 use blah_types::{get_timestamp, Id, Signed, UserKey};
 use data_encoding::BASE64_NOPAD;
 use database::{Transaction, TransactionOps};
 use feed::FeedData;
 use id::IdExt;
-use middleware::{Auth, ETag, MaybeAuth, ResultExt as _, SignedJson};
+use middleware::{Auth, ETag, MaybeAuth, RawApiError, ResultExt as _, SignedJson};
 use parking_lot::Mutex;
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_inline_default::serde_inline_default;
@@ -174,11 +172,7 @@ pub fn router(st: Arc<AppState>) -> Router {
         // correct CORS headers. Also `Authorization` must be explicitly included besides `*`.
         .layer(
             tower_http::cors::CorsLayer::permissive()
-                .allow_headers([HeaderName::from_static("*"), header::AUTHORIZATION])
-                .expose_headers([
-                    HeaderName::from_static(X_BLAH_NONCE),
-                    HeaderName::from_static(X_BLAH_DIFFICULTY),
-                ]),
+                .allow_headers([HeaderName::from_static("*"), header::AUTHORIZATION]),
         )
         .with_state(st);
     Router::new().nest("/_blah", router)
@@ -220,10 +214,7 @@ async fn handle_ws(State(st): ArcState, ws: WebSocketUpgrade) -> Response {
     })
 }
 
-async fn user_get(
-    State(st): ArcState,
-    auth: MaybeAuth,
-) -> Result<StatusCode, (HeaderMap, ApiError)> {
+async fn user_get(State(st): ArcState, auth: MaybeAuth) -> Response {
     let ret = (|| {
         match auth.into_optional()? {
             None => None,
@@ -232,9 +223,27 @@ async fn user_get(
         .ok_or(ApiError::UserNotFound)
     })();
 
+    // TODO: Hoist this into types crate.
+    #[derive(Serialize)]
+    struct ErrResp<'a> {
+        error: RawApiError<'a>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        register_challenge: Option<UserRegisterChallenge>,
+    }
+
     match ret {
-        Ok(_) => Ok(StatusCode::NO_CONTENT),
-        Err(err) => Err((st.register.challenge_headers(), err)),
+        Ok(_) => StatusCode::NO_CONTENT.into_response(),
+        Err(err) => {
+            let (status, raw_err) = err.to_raw();
+            if status != StatusCode::NOT_FOUND {
+                return err.into_response();
+            }
+            let resp = Json(ErrResp {
+                error: raw_err,
+                register_challenge: st.register.challenge(&st.config.register),
+            });
+            (status, resp).into_response()
+        }
     }
 }
 

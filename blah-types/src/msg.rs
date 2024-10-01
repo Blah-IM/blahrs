@@ -58,7 +58,17 @@ pub struct UserRegisterPayload {
     pub server_url: Url,
     pub id_url: IdUrl,
     pub id_key: PubKey,
-    pub challenge_nonce: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub challenge: Option<UserRegisterChallengeResponse>,
+}
+
+/// The server-specific challenge data for registration.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum UserRegisterChallengeResponse {
+    /// Proof of work challenge containing the same nonce from server challenge request.
+    /// The whole msg signee hash should have enough prefix zero bits.
+    Pow { nonce: u32 },
 }
 
 // FIXME: `deny_unknown_fields` breaks this.

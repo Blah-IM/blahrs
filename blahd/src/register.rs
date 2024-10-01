@@ -2,10 +2,10 @@ use std::num::NonZero;
 use std::time::Duration;
 
 use anyhow::{anyhow, ensure};
-use axum::http::{HeaderMap, HeaderName, StatusCode};
+use axum::http::StatusCode;
 use blah_types::identity::{IdUrl, UserIdentityDesc};
-use blah_types::msg::UserRegisterPayload;
-use blah_types::server::{X_BLAH_DIFFICULTY, X_BLAH_NONCE};
+use blah_types::msg::{UserRegisterChallengeResponse, UserRegisterPayload};
+use blah_types::server::UserRegisterChallenge;
 use blah_types::{get_timestamp, Signed};
 use http_body_util::BodyExt;
 use parking_lot::Mutex;
@@ -23,8 +23,6 @@ use crate::{ApiError, AppState, SERVER_AND_VERSION};
 pub struct Config {
     pub enable_public: bool,
 
-    pub difficulty: u8,
-    pub nonce_rotate_secs: NonZero<u64>,
     pub request_timeout_secs: u64,
 
     pub max_identity_description_bytes: usize,
@@ -32,6 +30,8 @@ pub struct Config {
     pub unsafe_allow_id_url_http: bool,
     pub unsafe_allow_id_url_custom_port: bool,
     pub unsafe_allow_id_url_single_label: bool,
+
+    pub challenge: ChallengeConfig,
 }
 
 impl Default for Config {
@@ -39,8 +39,7 @@ impl Default for Config {
         Self {
             enable_public: false,
 
-            difficulty: 16,
-            nonce_rotate_secs: 60.try_into().expect("not zero"),
+            challenge: ChallengeConfig::default(),
             request_timeout_secs: 5,
 
             max_identity_description_bytes: 64 << 10, // 64KiB
@@ -48,6 +47,24 @@ impl Default for Config {
             unsafe_allow_id_url_http: false,
             unsafe_allow_id_url_custom_port: false,
             unsafe_allow_id_url_single_label: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "snake_case")]
+pub enum ChallengeConfig {
+    Pow {
+        difficulty: u8,
+        nonce_rotate_secs: NonZero<u64>,
+    },
+}
+
+impl Default for ChallengeConfig {
+    fn default() -> Self {
+        Self::Pow {
+            difficulty: 16,
+            nonce_rotate_secs: 60.try_into().expect("not zero"),
         }
     }
 }
@@ -79,7 +96,7 @@ pub struct State {
     client: reqwest::Client,
 
     epoch: Instant,
-    config: Config,
+    nonce_rotate_secs: NonZero<u64>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -98,6 +115,9 @@ impl State {
             .timeout(Duration::from_secs(config.request_timeout_secs))
             .build()
             .expect("initialize TLS");
+        let ChallengeConfig::Pow {
+            nonce_rotate_secs, ..
+        } = config.challenge;
         Self {
             nonces: Nonces {
                 nonce: OsRng.next_u32(),
@@ -106,14 +126,15 @@ impl State {
             }
             .into(),
             client,
+
             epoch: Instant::now(),
-            config,
+            nonce_rotate_secs,
         }
     }
 
     fn nonce(&self) -> [u32; 2] {
         let cur_period =
-            Instant::now().duration_since(self.epoch).as_secs() / self.config.nonce_rotate_secs;
+            Instant::now().duration_since(self.epoch).as_secs() / self.nonce_rotate_secs;
         let mut n = self.nonces.lock();
         if n.update_period == cur_period {
             [n.nonce, n.prev_nonce]
@@ -129,21 +150,12 @@ impl State {
         }
     }
 
-    pub fn challenge_headers(&self) -> HeaderMap {
-        if !self.config.enable_public {
-            return HeaderMap::new();
-        }
-
-        HeaderMap::from_iter([
-            (
-                const { HeaderName::from_static(X_BLAH_NONCE) },
-                self.nonce()[0].into(),
-            ),
-            (
-                const { HeaderName::from_static(X_BLAH_DIFFICULTY) },
-                u16::from(self.config.difficulty).into(),
-            ),
-        ])
+    pub fn challenge(&self, config: &Config) -> Option<UserRegisterChallenge> {
+        let ChallengeConfig::Pow { difficulty, .. } = config.challenge;
+        config.enable_public.then(|| UserRegisterChallenge::Pow {
+            nonce: self.nonce()[0],
+            difficulty,
+        })
     }
 }
 
@@ -162,14 +174,16 @@ pub async fn user_register(
     if let Err(err) = st.config.register.validate_id_url(&reg.id_url) {
         return Err(ApiError::Disabled(err));
     }
-    api_ensure!(
-        st.register.nonce().contains(&reg.challenge_nonce),
-        "invalid challenge nonce",
-    );
 
     // Challenge verification.
-    let expect_bits = st.register.config.difficulty;
-    if expect_bits > 0 {
+    let ChallengeConfig::Pow { difficulty, .. } = st.config.register.challenge;
+    if difficulty > 0 {
+        let nonce_valid = matches!(reg.challenge,
+            Some(UserRegisterChallengeResponse::Pow { nonce })
+            if st.register.nonce().contains(&nonce)
+        );
+        api_ensure!(nonce_valid, "invalid challenge nonce");
+
         let hash = {
             let signee = msg.canonical_signee();
             let mut h = Sha256::new();
@@ -178,7 +192,7 @@ pub async fn user_register(
         };
         let hash = &hash[..];
         // `difficulty` is u8 so it must be < 256
-        let (bytes, bits) = (expect_bits as usize / 8, expect_bits as usize % 8);
+        let (bytes, bits) = (difficulty as usize / 8, difficulty as usize % 8);
         // NB. Shift by 8 would overflow and wrap around for u8. Convert it to u32 first.
         let ok = hash[..bytes].iter().all(|&b| b == 0) && (hash[bytes] as u32) >> (8 - bits) == 0;
         api_ensure!(ok, "hash challenge failed");

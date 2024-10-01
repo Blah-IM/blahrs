@@ -68,14 +68,6 @@ event_queue_len = 1024
 # Allow public registration.
 enable_public = false
 
-# The registration challenge difficulty.
-# It demands at least `difficulty` number of leading zeros in SHA256 for
-# Proof of Work (PoW).
-difficulty = 16
-
-# The challenge nonce rotation period in seconds.
-nonce_rotate_secs = 60
-
 # The timeout in seconds for fetching user `id_url`.
 request_timeout_secs = 5
 
@@ -89,3 +81,15 @@ unsafe_allow_id_url_http = false
 # [UNSAFE] Also accept `id_url` with custom port.
 # This should only be used for testing.
 unsafe_allow_id_url_custom_port = false
+
+# The difficulty of Proof of Work (PoW) challenge to avoid API abuse.
+# It demands at least `difficulty` number of leading zeros in SHA256.
+# Currently only PoW challenge is supported.
+# A zero difficulty effectively disables the challenge.
+[server.register.challenge.pow]
+# The difficulty.
+# On average `2^difficulty` SHA256 ops are required to complete the challenge.
+difficulty = 16
+
+# The challenge nonce rotation period in seconds.
+nonce_rotate_secs = 60

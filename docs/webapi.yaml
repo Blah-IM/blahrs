@@ -85,17 +85,10 @@ paths:
         404:
           description: |
             The user is not registered, or no token is not provided.
-          headers:
-            x-blah-nonce:
-              description: The challenge nonce for registration.
+          content:
+            application/json:
               schema:
-                type: integer
-                format: uint32
-            x-blah-difficulty:
-              description: The challenge difficulty for registration.
-              schema:
-                type: integer
-                format: uint32
+                $ref: '#/components/schemas/ApiErrorWithRegisterChallenge'
 
     post:
       summary: Register or update user identity
@@ -554,6 +547,24 @@ components:
               description: A human-readable error message.
               example: signature verification failed
 
+    ApiErrorWithRegisterChallenge:
+      allOf:
+        - $ref: '#/components/schemas/ApiError'
+        - type: object
+          properties:
+            register_challenge:
+              type: object
+              properties:
+                pow:
+                  type: object
+                  properties:
+                    nonce:
+                      type: integer
+                      format: uint32
+                    difficulty:
+                      type: integer
+                      format: uint32
+
     RoomList:
       type: object
       required:
@@ -869,10 +880,16 @@ components:
                 id_key:
                   type: string
                   description: Hex encoded user primary key `id_key`.
-                challenge_nonce:
-                  type: integer
-                  format: uint32
-                  description: The challenge nonce retrieved from a recent GET response of `/user/me`.
+                challenge:
+                  type: object
+                  properties:
+                    pow:
+                      type: object
+                      properties:
+                        nonce:
+                          type: integer
+                          format: uint32
+                          description: The challenge nonce retrieved from a recent GET response of `/user/me`.
 
     UserIdentityDescription:
       type: object

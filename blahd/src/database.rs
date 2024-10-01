@@ -12,7 +12,6 @@ use blah_types::{Id, PubKey, Signee, UserKey};
 use parking_lot::Mutex;
 use rusqlite::{named_params, params, prepare_cached_and_bind, Connection, OpenFlags, Row};
 use serde::Deserialize;
-use serde_inline_default::serde_inline_default;
 
 use crate::middleware::ApiError;
 
@@ -31,7 +30,6 @@ type Result<T, E = ApiError> = std::result::Result<T, E>;
 // `echo -n 'blahd-database-0' | sha256sum | head -c5` || version
 const APPLICATION_ID: i32 = 0xd9e_8405;
 
-#[serde_inline_default]
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Config {

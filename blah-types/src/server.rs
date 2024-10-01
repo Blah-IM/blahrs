@@ -6,9 +6,6 @@ use url::Url;
 use crate::msg::{Id, MemberPermission, RoomAttrs, SignedChatMsgWithId};
 use crate::PubKey;
 
-pub const X_BLAH_NONCE: &str = "x-blah-nonce";
-pub const X_BLAH_DIFFICULTY: &str = "x-blah-difficulty";
-
 /// Metadata about the version and capabilities of a Chat Server.
 ///
 /// It should be relatively stable and do not change very often.
@@ -35,6 +32,18 @@ pub struct ServerMetadata {
 pub struct ServerCapabilities {
     /// Whether registration is open to public.
     pub allow_public_register: bool,
+}
+
+/// Registration challenge information.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum UserRegisterChallenge {
+    /// Proof-of-work (PoW) challenge.
+    Pow { nonce: u32, difficulty: u8 },
+
+    /// A catch-all unknown challenge type.
+    #[serde(other, skip_serializing)]
+    Unknown,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
