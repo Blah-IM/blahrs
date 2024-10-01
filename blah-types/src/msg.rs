@@ -376,9 +376,10 @@ bitflags::bitflags! {
         const POST_CHAT = 1 << 0;
         const ADD_MEMBER = 1 << 1;
         const DELETE_ROOM = 1 << 2;
+        const LIST_MEMBERS = 1 << 3;
 
         const MAX_SELF_ADD = Self::POST_CHAT.bits();
-        const MAX_PEER_CHAT = Self::POST_CHAT.bits() | Self::DELETE_ROOM.bits();
+        const MAX_PEER_CHAT = Self::POST_CHAT.bits() | Self::DELETE_ROOM.bits() | Self::LIST_MEMBERS.bits();
 
         const ALL = !0;
     }

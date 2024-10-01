@@ -17,7 +17,7 @@ use blah_types::msg::{
 };
 use blah_types::server::{RoomMetadata, ServerMetadata, UserRegisterChallenge};
 use blah_types::{Id, SignExt, Signed, UserKey};
-use blahd::{AppState, Database, RoomList, RoomMsgs};
+use blahd::{AppState, Database, RoomList, RoomMember, RoomMemberList, RoomMsgs};
 use ed25519_dalek::SigningKey;
 use expect_test::expect;
 use futures_util::future::BoxFuture;
@@ -1565,4 +1565,62 @@ async fn event(server: Server) {
         let got2 = ws2.next().await.unwrap().unwrap();
         assert_eq!(got2, WsEvent::Msg(chat.msg));
     }
+}
+
+#[rstest]
+#[tokio::test]
+async fn room_member(server: Server) {
+    let rid = server
+        .create_room(
+            &ALICE,
+            RoomAttrs::PUBLIC_READABLE | RoomAttrs::PUBLIC_JOINABLE,
+            "public",
+        )
+        .await
+        .unwrap();
+
+    // Authentication is required.
+    server
+        .get::<RoomMemberList>(&format!("/room/{rid}/member"), None)
+        .await
+        .expect_api_err(StatusCode::UNAUTHORIZED, "unauthorized");
+
+    // Not a room member.
+    server
+        .get::<RoomMemberList>(&format!("/room/{rid}/member"), Some(&auth(&BOB)))
+        .await
+        .expect_api_err(StatusCode::NOT_FOUND, "room_not_found");
+
+    server
+        .join_room(rid, &BOB, MemberPermission::POST_CHAT)
+        .await
+        .unwrap();
+
+    // No permission.
+    server
+        .get::<RoomMemberList>(&format!("/room/{rid}/member"), Some(&auth(&BOB)))
+        .await
+        .expect_api_err(StatusCode::FORBIDDEN, "permission_denied");
+
+    // OK.
+    let got = server
+        .get::<RoomMemberList>(&format!("/room/{rid}/member"), Some(&auth(&ALICE)))
+        .await
+        .unwrap();
+    let expect = RoomMemberList {
+        members: vec![
+            RoomMember {
+                id_key: ALICE.pubkeys.id_key.clone(),
+                permission: MemberPermission::ALL,
+                last_seen_cid: None,
+            },
+            RoomMember {
+                id_key: BOB.pubkeys.id_key.clone(),
+                permission: MemberPermission::POST_CHAT,
+                last_seen_cid: None,
+            },
+        ],
+        skip_token: None,
+    };
+    assert_eq!(got, expect);
 }

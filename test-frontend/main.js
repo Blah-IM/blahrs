@@ -4,7 +4,8 @@ const msgFlow = document.querySelector('#msg-flow');
 const idPubkeyInput = document.querySelector('#id-pubkey');
 const actPubkeyDisplay = document.querySelector('#act-pubkey');
 const serverUrlInput = document.querySelector('#server-url');
-const roomsInput = document.querySelector('#rooms');
+const roomsList = document.querySelector('#rooms');
+const membersList = document.querySelector('#room-members');
 const joinNewRoomInput = document.querySelector('#join-new-room');
 const chatInput = document.querySelector('#chat');
 
@@ -23,6 +24,10 @@ function bufToHex(buf) {
 
 function hexToBuf(hex) {
     return new Uint8Array(hex.match(/[\da-f]{2}/gi).map(m => parseInt(m, 16)))
+}
+
+function shortenIdKey(id_key) {
+    return id_key.replace(/^(.{4}).*(.{4})$/, '$1…$2');
 }
 
 function getIdPubkey() {
@@ -186,7 +191,7 @@ async function showChatMsg(chat) {
     }
 
     // TODO: The relationship of id_key and act_key is not verified.
-    const shortUser = chat.signee.id_key.replace(/^(.{4}).*(.{4})$/, '$1…$2');
+    const shortUser = shortenIdKey(chat.signee.id_key);
     const time = new Date(chat.signee.timestamp * 1000).toISOString();
 
     const el = document.createElement('div', {});
@@ -243,9 +248,10 @@ async function genAuthHeader() {
 async function enterRoom(rid) {
     log(`loading room: ${rid}`);
     curRoom = rid;
-    roomsInput.value = rid;
+    roomsList.value = rid;
 
     msgFlow.replaceChildren();
+    membersList.replaceChildren();
 
     let roomMetadata;
     try {
@@ -255,6 +261,20 @@ async function enterRoom(rid) {
         document.title = `Blah: ${roomMetadata.title}`;
     } catch (err) {
         log(`failed to get room metadata: ${err}`);
+    }
+
+    try {
+        const resp = await fetch(`${apiUrl}/room/${rid}/member`, await genAuthHeader());
+        const json = await resp.json();
+        if (resp.status !== 200) throw new Error(`status ${resp.status}: ${json.error.message}`);
+        for (const { id_key, permission, last_seen_cid } of json.members) {
+            const el = document.createElement('option')
+            el.value = id_key;
+            el.innerText = `${shortenIdKey(id_key)} perm=${permission} last_seen=${last_seen_cid || '-'}`;
+            membersList.appendChild(el);
+        }
+    } catch (err) {
+        log(`failed to fetch members: ${err}`);
     }
 
     try {
@@ -357,10 +377,10 @@ async function loadRoomList(autoJoin) {
         }
     }
 
-    loadInto(roomsInput, 'joined')
+    loadInto(roomsList, 'joined')
     .then(async (_) => {
         if (autoJoin) {
-            const el = roomsInput.querySelector('option:nth-child(2)');
+            const el = roomsList.querySelector('option:nth-child(2)');
             if (el !== null) {
                 await enterRoom(el.value);
             }
@@ -556,8 +576,8 @@ chatInput.onkeypress = async (e) => {
         chatInput.focus();
     }
 };
-roomsInput.onchange = async (_) => {
-    await enterRoom(roomsInput.value);
+roomsList.onchange = async (_) => {
+    await enterRoom(roomsList.value);
 };
 joinNewRoomInput.onchange = async (_) => {
     await joinRoom(joinNewRoomInput.value);

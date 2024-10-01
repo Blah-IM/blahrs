@@ -242,19 +242,26 @@ pub trait TransactionOps {
         .ok_or(ApiError::RoomNotFound)
     }
 
-    // FIXME: Eliminate this.
-    // Currently broadcasting msgs requires traversing over all members.
-    fn list_room_members(&self, rid: Id) -> Result<Vec<i64>> {
+    fn list_room_members(
+        &self,
+        rid: Id,
+        start_uid: Id,
+        page_len: Option<NonZero<u32>>,
+    ) -> Result<Vec<(i64, PubKey, MemberPermission, Id)>> {
+        let page_len = page_len.map_or(-1i64, |v| v.get().into());
         prepare_cached_and_bind!(
             self.conn(),
             r"
-            SELECT `uid`
+            SELECT `uid`, `id_key`, `room_member`.`permission`, `last_seen_cid`
             FROM `room_member`
-            WHERE `rid` = :rid
+            JOIN `user` USING (`uid`)
+            WHERE `rid` = :rid AND
+                `uid` > :start_uid
+            LIMIT :page_len
             "
         )
         .raw_query()
-        .mapped(|row| row.get::<_, i64>(0))
+        .mapped(|row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)))
         .collect::<rusqlite::Result<Vec<_>>>()
         .map_err(Into::into)
     }

@@ -511,6 +511,56 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiError'
 
+  /_blah/room/{rid}/member:
+    get:
+      summary: List room members
+      parameters:
+        - name: Authorization
+          in: header
+          required: true
+          description: Proof of membership.
+          schema:
+            $ref: '#/components/schemas/Signed-Auth'
+
+        - name: top
+          in: query
+          schema:
+            type: string
+          description:
+            The maximum count of rooms returned in a single response. This is
+            only an advice and server can clamp it to a smaller value.
+
+        - name: skipToken
+          in: query
+          schema:
+            type: string
+          description:
+            The page token returned from a previous list response to fetch the
+            next page.
+
+      responses:
+        200:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RoomMemberList'
+
+        403:
+          description: |
+            The user does not have permission to get room members
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+
+        404:
+          description: |
+            Room does not exist or the user is not in the room.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+
 # Ideally we should generate these from src, but we need to
 # WAIT: https://github.com/juhaku/utoipa/pull/1034
 components:
@@ -633,6 +683,34 @@ components:
             $ref: '#/components/schemas/WithMsgId-Signed-Chat'
         skip_token:
           description: The token for fetching the next page.
+          type: string
+
+    RoomMemberList:
+      type: object
+      required:
+        - members
+      properties:
+        members:
+          description: Room members in server-specified order.
+          type: array
+          items:
+            $ref: '#/components/schemas/RoomMember'
+        skip_token:
+          description: The token for fetching the next page.
+          type: string
+
+    RoomMember:
+      type: object
+      required:
+        - id_key
+        - permission
+      properties:
+        id_key:
+          type: string
+        permission:
+          type: integer
+          format: int32
+        last_seen_cid:
           type: string
 
     RichText:

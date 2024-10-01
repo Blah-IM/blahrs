@@ -17,7 +17,7 @@ use blah_types::msg::{
     SignedChatMsgWithId, UserRegisterPayload,
 };
 use blah_types::server::{RoomMetadata, ServerCapabilities, ServerMetadata, UserRegisterChallenge};
-use blah_types::{get_timestamp, Id, Signed, UserKey};
+use blah_types::{get_timestamp, Id, PubKey, Signed, UserKey};
 use data_encoding::BASE64_NOPAD;
 use database::{Transaction, TransactionOps};
 use feed::FeedData;
@@ -159,6 +159,7 @@ pub fn router(st: Arc<AppState>) -> Router {
         .route("/room/:rid/msg", get(room_msg_list).post(room_msg_post))
         .route("/room/:rid/msg/:cid/seen", post(room_msg_mark_seen))
         .route("/room/:rid/admin", post(room_admin))
+        .route("/room/:rid/member", get(room_member_list))
         .layer(tower_http::limit::RequestBodyLimitLayer::new(
             st.config.max_request_len,
         ))
@@ -554,7 +555,11 @@ async fn room_msg_post(
 
         let cid = Id::gen();
         txn.add_room_chat_msg(rid, uid, cid, &chat)?;
-        let members = txn.list_room_members(rid)?;
+        let members = txn
+            .list_room_members(rid, Id::MIN, None)?
+            .into_iter()
+            .map(|(uid, ..)| uid)
+            .collect::<Vec<_>>();
         Ok((cid, members))
     })?;
 
@@ -667,4 +672,65 @@ async fn room_msg_mark_seen(
         txn.mark_room_msg_seen(rid, uid, Id(cid as _))
     })?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+// TODO: Hoist these into types crate.
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RoomMemberList {
+    pub members: Vec<RoomMember>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub skip_token: Option<Id>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RoomMember {
+    pub id_key: PubKey,
+    pub permission: MemberPermission,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_seen_cid: Option<Id>,
+}
+
+async fn room_member_list(
+    st: ArcState,
+    R(Path(rid), _): RE<Path<Id>>,
+    R(Query(pagination), _): RE<Query<Pagination>>,
+    Auth(user): Auth,
+) -> Result<Json<RoomMemberList>, ApiError> {
+    api_ensure!(
+        pagination.until_token.is_none(),
+        "untilToken is not supported for this API"
+    );
+
+    st.db.with_read(|txn| {
+        let (_, perm, _) = txn.get_room_member(rid, &user)?;
+        api_ensure!(
+            perm.contains(MemberPermission::LIST_MEMBERS),
+            ApiError::PermissionDenied("the user does not have permission to get room members"),
+        );
+
+        let page_len = pagination.effective_page_len(&st);
+        let mut last_uid = None;
+        let members = txn
+            .list_room_members(
+                rid,
+                pagination.skip_token.unwrap_or(Id::MIN),
+                Some(page_len),
+            )?
+            .into_iter()
+            .map(|(uid, id_key, permission, last_seen_cid)| {
+                last_uid = Some(Id(uid));
+                RoomMember {
+                    id_key,
+                    permission,
+                    last_seen_cid: (last_seen_cid != Id(0)).then_some(last_seen_cid),
+                }
+            })
+            .collect::<Vec<_>>();
+        let skip_token = (members.len() as u32 == page_len.get())
+            .then(|| last_uid.expect("page must not be empty"));
+        Ok(Json(RoomMemberList {
+            members,
+            skip_token,
+        }))
+    })
 }
