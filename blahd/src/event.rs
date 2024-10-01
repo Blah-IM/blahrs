@@ -130,7 +130,11 @@ impl Stream for UserEventReceiver {
 pub async fn handle_ws(st: Arc<AppState>, ws: &mut WebSocket) -> Result<Infallible> {
     let config = &st.config.ws;
     let (ws_tx, ws_rx) = ws.split();
-    let mut ws_rx = ws_rx.map(|ret| ret.and_then(|msg| msg.into_text()).map_err(|_| StreamEnded));
+    let mut ws_rx = ws_rx.map(|ret| match ret {
+        Ok(Message::Text(data)) => Ok(data),
+        Ok(Message::Close(_)) | Err(_) => Err(StreamEnded.into()),
+        _ => bail!("unexpected message type"),
+    });
     let mut ws_tx = WsSenderWrapper {
         inner: ws_tx,
         config,
