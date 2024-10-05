@@ -5,6 +5,7 @@
 *.profraw
 result
 result-*
+/docs/types.json
 
 # Test configurations.
 config.toml

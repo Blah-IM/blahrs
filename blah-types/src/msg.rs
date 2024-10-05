@@ -15,6 +15,7 @@ use crate::{PubKey, Signed};
 /// It's currently serialized as a string for JavaScript's convenience.
 #[serde_as]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema), schema(value_type = String))]
 #[serde(transparent)]
 pub struct Id(#[serde_as(as = "DisplayFromStr")] pub i64);
 
@@ -39,6 +40,7 @@ impl Id {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct WithMsgId<T> {
     pub cid: Id,
     #[serde(flatten)]
@@ -53,17 +55,20 @@ impl<T> WithMsgId<T> {
 
 /// Register a user on a chat server.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 #[serde(tag = "typ", rename = "user_register")]
 pub struct UserRegisterPayload {
     pub server_url: Url,
     pub id_url: IdUrl,
     pub id_key: PubKey,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "utoipa", schema(nullable = false))]
     pub challenge: Option<UserRegisterChallengeResponse>,
 }
 
 /// The server-specific challenge data for registration.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum UserRegisterChallengeResponse {
     /// Proof of work challenge containing the same nonce from server challenge request.
@@ -73,6 +78,7 @@ pub enum UserRegisterChallengeResponse {
 
 // FIXME: `deny_unknown_fields` breaks this.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 #[serde(tag = "typ", rename = "chat")]
 pub struct ChatPayload {
     pub rich_text: RichText,
@@ -81,6 +87,7 @@ pub struct ChatPayload {
 
 /// Ref: <https://github.com/Blah-IM/Weblah/blob/a3fa0f265af54c846f8d65f42aa4409c8dba9dd9/src/lib/richText.ts>
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema), schema(value_type = Vec<RichTextPieceRaw>))]
 #[serde(transparent)]
 pub struct RichText(pub Vec<RichTextPiece>);
 
@@ -103,8 +110,9 @@ impl Serialize for RichTextPiece {
     }
 }
 
-/// The protocol representation of `RichTextPiece`.
+/// The representation on wire of `RichTextPiece`.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 #[serde(untagged)]
 enum RichTextPieceRaw {
     Text(String),
@@ -148,6 +156,7 @@ impl<'de> Deserialize<'de> for RichText {
 
 // TODO: This protocol format is quite large. Could use bitflags for database.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct TextAttrs {
     #[serde(default, rename = "b", skip_serializing_if = "is_default")]
     pub bold: bool,
@@ -159,6 +168,7 @@ pub struct TextAttrs {
     pub italic: bool,
     // TODO: Should we validate and/or filter the URL.
     #[serde(default, skip_serializing_if = "is_default")]
+    #[cfg_attr(feature = "utoipa", schema(nullable = false))]
     pub link: Option<String>,
     #[serde(default, rename = "s", skip_serializing_if = "is_default")]
     pub strike: bool,
@@ -271,6 +281,7 @@ pub type SignedChatMsg = Signed<ChatPayload>;
 pub type SignedChatMsgWithId = WithMsgId<SignedChatMsg>;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 #[serde(tag = "typ")]
 pub enum CreateRoomPayload {
     #[serde(rename = "create_room")]
@@ -281,6 +292,7 @@ pub enum CreateRoomPayload {
 
 /// Multi-user room.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct CreateGroup {
     pub attrs: RoomAttrs,
     pub title: String,
@@ -288,11 +300,13 @@ pub struct CreateGroup {
 
 /// Peer-to-peer chat room with exactly two symmetric users.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct CreatePeerChat {
     pub peer: PubKey,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 #[serde(tag = "typ", rename = "delete_room")]
 pub struct DeleteRoomPayload {
     pub room: Id,
@@ -302,6 +316,7 @@ pub struct DeleteRoomPayload {
 /// 1. Sorted by userkeys.
 /// 2. No duplicated users.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 #[serde(try_from = "Vec<RoomMember>")]
 pub struct RoomMemberList(pub Vec<RoomMember>);
 
@@ -327,6 +342,7 @@ impl TryFrom<Vec<RoomMember>> for RoomMemberList {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct RoomMember {
     pub permission: MemberPermission,
     pub user: PubKey,
@@ -336,10 +352,12 @@ pub struct RoomMember {
 ///
 /// TODO: Should we use JWT here instead?
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 #[serde(tag = "typ", rename = "auth")]
 pub struct AuthPayload {}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 // `typ` is provided by `RoomAdminOp`.
 pub struct RoomAdminPayload {
     pub room: Id,
@@ -348,6 +366,7 @@ pub struct RoomAdminPayload {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 #[serde(tag = "typ", rename_all = "snake_case")]
 pub enum RoomAdminOp {
     AddMember {
@@ -363,6 +382,7 @@ pub enum RoomAdminOp {
 bitflags::bitflags! {
     /// TODO: Is this a really all about permission, or is a generic `UserFlags`?
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema), schema(value_type = i32))]
     pub struct ServerPermission: i32 {
         const CREATE_ROOM = 1 << 0;
 
@@ -372,6 +392,7 @@ bitflags::bitflags! {
     }
 
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema), schema(value_type = i32))]
     pub struct MemberPermission: i32 {
         const POST_CHAT = 1 << 0;
         const ADD_MEMBER = 1 << 1;
@@ -385,6 +406,7 @@ bitflags::bitflags! {
     }
 
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+    #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema), schema(value_type = i32))]
     pub struct RoomAttrs: i32 {
         // NB. Used by schema.
         const PUBLIC_READABLE = 1 << 0;

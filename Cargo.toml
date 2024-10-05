@@ -7,6 +7,10 @@ members = [
 ]
 default-members = ["blahd"]
 
+[workspace.dependencies]
+# Need: Generic support, impl bound fix, doc comment fix.
+utoipa = { git = "https://github.com/juhaku/utoipa.git", rev = "70340226ef8c9d5fd540c637b952e961c7a364f2" }
+
 [workspace.lints.clippy]
 allow_attributes_without_reason = "warn"
 dbg_macro = "warn"
