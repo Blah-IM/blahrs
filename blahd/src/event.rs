@@ -8,7 +8,9 @@ use std::task::{Context, Poll};
 use std::time::Duration;
 
 use anyhow::{bail, Context as _, Result};
-use axum::extract::ws::{Message, WebSocket};
+use axum::extract::ws::{close_code, CloseFrame, Message, WebSocket};
+use axum::extract::WebSocketUpgrade;
+use axum::response::Response;
 use blah_types::msg::{AuthPayload, SignedChatMsg};
 use blah_types::server::ClientEvent;
 use blah_types::Signed;
@@ -23,7 +25,7 @@ use tokio_stream::wrappers::errors::BroadcastStreamRecvError;
 use tokio_stream::wrappers::BroadcastStream;
 
 use crate::database::TransactionOps;
-use crate::AppState;
+use crate::{AppState, ArcState};
 
 // We a borrowed type rather than an owned type.
 // So redefine it. Not sure if there is a better way.
@@ -127,7 +129,30 @@ impl Stream for UserEventReceiver {
     }
 }
 
-pub async fn handle_ws(st: Arc<AppState>, ws: &mut WebSocket) -> Result<Infallible> {
+// TODO: Authenticate via HTTP query?
+pub async fn get_ws(st: ArcState, ws: WebSocketUpgrade) -> Response {
+    ws.on_upgrade(move |mut socket| async move {
+        match handle_ws(st.0, &mut socket).await {
+            #[allow(
+                unreachable_patterns,
+                reason = "compatibility before min_exhaustive_patterns"
+            )]
+            Ok(never) => match never {},
+            Err(err) if err.is::<StreamEnded>() => {}
+            Err(err) => {
+                tracing::debug!(%err, "ws error");
+                let _: Result<_, _> = socket
+                    .send(Message::Close(Some(CloseFrame {
+                        code: close_code::ERROR,
+                        reason: err.to_string().into(),
+                    })))
+                    .await;
+            }
+        }
+    })
+}
+
+async fn handle_ws(st: Arc<AppState>, ws: &mut WebSocket) -> Result<Infallible> {
     let config = &st.config.ws;
     let (ws_tx, ws_rx) = ws.split();
     let mut ws_rx = ws_rx.map(|ret| match ret {

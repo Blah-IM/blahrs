@@ -3,10 +3,10 @@ use std::time::Duration;
 
 use anyhow::{anyhow, ensure};
 use axum::http::StatusCode;
+use blah_types::get_timestamp;
 use blah_types::identity::{IdUrl, UserIdentityDesc};
 use blah_types::msg::{UserRegisterChallengeResponse, UserRegisterPayload};
 use blah_types::server::UserRegisterChallenge;
-use blah_types::{get_timestamp, Signed};
 use http_body_util::BodyExt;
 use parking_lot::Mutex;
 use rand::rngs::OsRng;
@@ -15,8 +15,9 @@ use serde::Deserialize;
 use sha2::{Digest, Sha256};
 
 use crate::database::TransactionOps;
+use crate::middleware::SignedJson;
 use crate::utils::Instant;
-use crate::{ApiError, AppState, SERVER_AND_VERSION};
+use crate::{ApiError, ArcState, SERVER_AND_VERSION};
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -159,9 +160,9 @@ impl State {
     }
 }
 
-pub async fn user_register(
-    st: &AppState,
-    msg: Signed<UserRegisterPayload>,
+pub async fn post_user(
+    axum::extract::State(st): ArcState,
+    SignedJson(msg): SignedJson<UserRegisterPayload>,
 ) -> Result<StatusCode, ApiError> {
     if !st.config.register.enable_public {
         return Err(ApiError::Disabled("public registration is disabled"));

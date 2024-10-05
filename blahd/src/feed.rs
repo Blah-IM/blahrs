@@ -3,15 +3,19 @@ use std::fmt;
 use std::num::NonZero;
 use std::time::Duration;
 
-use axum::http::header;
+use axum::extract::{OriginalUri, Path, Query};
+use axum::http::{header, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::Json;
-use blah_types::msg::{SignedChatMsgWithId, WithMsgId};
+use blah_types::msg::{RoomAttrs, SignedChatMsgWithId, WithMsgId};
 use blah_types::Id;
 use serde::{Deserialize, Serialize};
 use url::Url;
 
+use crate::database::TransactionOps;
 use crate::id::timestamp_of_id;
+use crate::middleware::ETag;
+use crate::{query_room_msgs, ApiError, ArcState, Pagination, HEADER_PUBLIC_NO_CACHE};
 
 const JSON_FEED_MIME: &str = "application/feed+json";
 const ATOM_FEED_MIME: &str = "application/atom+xml";
@@ -213,4 +217,66 @@ impl FeedType for AtomFeed {
         let body = AtomFeed(data).to_string();
         ([(header::CONTENT_TYPE, ATOM_FEED_MIME)], body).into_response()
     }
+}
+
+pub async fn get_room_feed<FT: FeedType>(
+    st: ArcState,
+    ETag(etag): ETag<Id>,
+    OriginalUri(req_uri): OriginalUri,
+    Path(rid): Path<Id>,
+    Query(mut pagination): Query<Pagination>,
+) -> Result<Response, ApiError> {
+    let self_url = st
+        .config
+        .base_url
+        .join(req_uri.path())
+        .expect("base_url can be a base");
+
+    pagination.top = Some(
+        pagination
+            .effective_page_len(&st)
+            .min(st.config.feed.max_page_len),
+    );
+
+    let (title, msgs, skip_token) = st.db.with_read(|txn| {
+        let (attrs, title) = txn.get_room_having(rid, RoomAttrs::PUBLIC_READABLE)?;
+        // Sanity check.
+        assert!(!attrs.contains(RoomAttrs::PEER_CHAT));
+        let title = title.expect("public room must have title");
+        let (msgs, skip_token) = query_room_msgs(&st, txn, rid, pagination)?;
+        Ok((title, msgs, skip_token))
+    })?;
+
+    // Use `Id(0)` as the tag for an empty list.
+    let ret_etag = msgs.first().map_or(Id(0), |msg| msg.cid);
+    if etag == Some(ret_etag) {
+        return Ok(StatusCode::NOT_MODIFIED.into_response());
+    }
+
+    let next_url = skip_token.map(|skip_token| {
+        let next_params = Pagination {
+            skip_token: Some(skip_token),
+            top: pagination.top,
+            until_token: None,
+        };
+        let mut next_url = self_url.clone();
+        {
+            let mut query = next_url.query_pairs_mut();
+            let ser = serde_urlencoded::Serializer::new(&mut query);
+            next_params
+                .serialize(ser)
+                .expect("serialization cannot fail");
+            query.finish();
+        }
+        next_url
+    });
+
+    let resp = FT::to_feed_response(FeedData {
+        rid,
+        title,
+        msgs,
+        self_url,
+        next_url,
+    });
+    Ok(([HEADER_PUBLIC_NO_CACHE], ETag(Some(ret_etag)), resp).into_response())
 }
