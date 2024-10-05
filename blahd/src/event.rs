@@ -10,6 +10,7 @@ use std::time::Duration;
 use anyhow::{bail, Context as _, Result};
 use axum::extract::ws::{Message, WebSocket};
 use blah_types::msg::{AuthPayload, SignedChatMsg};
+use blah_types::server::ClientEvent;
 use blah_types::Signed;
 use futures_util::future::Either;
 use futures_util::stream::SplitSink;
@@ -24,12 +25,11 @@ use tokio_stream::wrappers::BroadcastStream;
 use crate::database::TransactionOps;
 use crate::AppState;
 
-#[derive(Debug, Deserialize)]
-pub enum Incoming {}
-
+// We a borrowed type rather than an owned type.
+// So redefine it. Not sure if there is a better way.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum Outgoing<'a> {
+enum ServerEvent<'a> {
     /// A message from a joined room.
     Msg(&'a SignedChatMsg),
     /// The receiver is too slow to receive and some events and are dropped.
@@ -84,7 +84,7 @@ struct WsSenderWrapper<'ws, 'c> {
 }
 
 impl WsSenderWrapper<'_, '_> {
-    async fn send(&mut self, msg: &Outgoing<'_>) -> Result<()> {
+    async fn send(&mut self, msg: &ServerEvent<'_>) -> Result<()> {
         let data = serde_json::to_string(&msg).expect("serialization cannot fail");
         let fut = tokio::time::timeout(
             self.config.send_timeout_sec,
@@ -173,11 +173,11 @@ pub async fn handle_ws(st: Arc<AppState>, ws: &mut WebSocket) -> Result<Infallib
     let mut stream = stream_select!(ws_rx.map(Either::Left), event_rx.map(Either::Right));
     loop {
         match stream.next().await.ok_or(StreamEnded)? {
-            Either::Left(msg) => match serde_json::from_str::<Incoming>(&msg?)? {},
+            Either::Left(msg) => match serde_json::from_str::<ClientEvent>(&msg?)? {},
             Either::Right(ret) => {
                 let msg = match &ret {
-                    Ok(chat) => Outgoing::Msg(chat),
-                    Err(BroadcastStreamRecvError::Lagged(_)) => Outgoing::Lagged,
+                    Ok(chat) => ServerEvent::Msg(chat),
+                    Err(BroadcastStreamRecvError::Lagged(_)) => ServerEvent::Lagged,
                 };
                 // TODO: Concurrent send.
                 ws_tx.send(&msg).await?;

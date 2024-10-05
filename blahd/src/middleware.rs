@@ -10,6 +10,7 @@ use axum::http::{header, request, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, IntoResponseParts, Response, ResponseParts};
 use axum::{async_trait, Json};
 use blah_types::msg::AuthPayload;
+use blah_types::server::ErrorObject;
 use blah_types::{Signed, UserKey};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
@@ -45,7 +46,7 @@ macro_rules! define_api_error {
                         )*
                     }
                 };
-                (status, RawApiError { code, message })
+                (status, ErrorObject { code, message })
             }
         }
 
@@ -76,11 +77,7 @@ pub enum ApiError {
 
 }
 
-#[derive(Debug, Serialize)]
-pub struct RawApiError<'a> {
-    pub code: &'a str,
-    pub message: &'a str,
-}
+pub type RawApiError<'a> = ErrorObject<&'a str>;
 
 macro_rules! api_ensure {
     ($assertion:expr, $msg:literal $(,)?) => {

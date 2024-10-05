@@ -16,13 +16,16 @@ use blah_types::msg::{
     MemberPermission, RoomAdminOp, RoomAdminPayload, RoomAttrs, ServerPermission,
     SignedChatMsgWithId, UserRegisterPayload,
 };
-use blah_types::server::{RoomMetadata, ServerCapabilities, ServerMetadata, UserRegisterChallenge};
-use blah_types::{get_timestamp, Id, PubKey, Signed, UserKey};
+use blah_types::server::{
+    ErrorResponseWithChallenge, RoomList, RoomMember, RoomMemberList, RoomMetadata, RoomMsgs,
+    ServerCapabilities, ServerMetadata,
+};
+use blah_types::{get_timestamp, Id, Signed, UserKey};
 use data_encoding::BASE64_NOPAD;
 use database::{Transaction, TransactionOps};
 use feed::FeedData;
 use id::IdExt;
-use middleware::{Auth, ETag, MaybeAuth, RawApiError, ResultExt as _, SignedJson};
+use middleware::{Auth, ETag, MaybeAuth, ResultExt as _, SignedJson};
 use parking_lot::Mutex;
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_inline_default::serde_inline_default;
@@ -224,14 +227,6 @@ async fn user_get(State(st): ArcState, auth: MaybeAuth) -> Response {
         .ok_or(ApiError::UserNotFound)
     })();
 
-    // TODO: Hoist this into types crate.
-    #[derive(Serialize)]
-    struct ErrResp<'a> {
-        error: RawApiError<'a>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        register_challenge: Option<UserRegisterChallenge>,
-    }
-
     match ret {
         Ok(_) => StatusCode::NO_CONTENT.into_response(),
         Err(err) => {
@@ -239,7 +234,7 @@ async fn user_get(State(st): ArcState, auth: MaybeAuth) -> Response {
             if status != StatusCode::NOT_FOUND {
                 return err.into_response();
             }
-            let resp = Json(ErrResp {
+            let resp = Json(ErrorResponseWithChallenge {
                 error: raw_err,
                 register_challenge: st.register.challenge(&st.config.register),
             });
@@ -253,13 +248,6 @@ async fn user_register(
     SignedJson(msg): SignedJson<UserRegisterPayload>,
 ) -> Result<StatusCode, ApiError> {
     register::user_register(&st, msg).await
-}
-
-#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct RoomList {
-    pub rooms: Vec<RoomMetadata>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub skip_token: Option<Id>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -400,13 +388,6 @@ impl Pagination {
             .unwrap_or(u32::MAX.try_into().expect("not zero"))
             .min(st.config.max_page_len)
     }
-}
-
-#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct RoomMsgs {
-    pub msgs: Vec<SignedChatMsgWithId>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub skip_token: Option<Id>,
 }
 
 async fn room_msg_list(
@@ -672,22 +653,6 @@ async fn room_msg_mark_seen(
         txn.mark_room_msg_seen(rid, uid, Id(cid as _))
     })?;
     Ok(StatusCode::NO_CONTENT)
-}
-
-// TODO: Hoist these into types crate.
-#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct RoomMemberList {
-    pub members: Vec<RoomMember>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub skip_token: Option<Id>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct RoomMember {
-    pub id_key: PubKey,
-    pub permission: MemberPermission,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub last_seen_cid: Option<Id>,
 }
 
 async fn room_member_list(

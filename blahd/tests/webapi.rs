@@ -15,9 +15,12 @@ use blah_types::msg::{
     SignedChatMsg, SignedChatMsgWithId, UserRegisterChallengeResponse, UserRegisterPayload,
     WithMsgId,
 };
-use blah_types::server::{RoomMetadata, ServerMetadata, UserRegisterChallenge};
+use blah_types::server::{
+    RoomList, RoomMember, RoomMemberList, RoomMetadata, RoomMsgs, ServerEvent, ServerMetadata,
+    UserRegisterChallenge,
+};
 use blah_types::{Id, SignExt, Signed, UserKey};
-use blahd::{AppState, Database, RoomList, RoomMember, RoomMemberList, RoomMsgs};
+use blahd::{AppState, Database};
 use ed25519_dalek::SigningKey;
 use expect_test::expect;
 use futures_util::future::BoxFuture;
@@ -140,14 +143,6 @@ impl fmt::Display for ApiError {
 
 impl std::error::Error for ApiError {}
 
-// TODO: Hoist this into types crate.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum WsEvent {
-    // TODO: Include cid?
-    Msg(SignedChatMsg),
-}
-
 #[derive(Debug)]
 struct Server {
     port: u16,
@@ -166,7 +161,7 @@ impl Server {
     async fn connect_ws(
         &self,
         auth_user: Option<&User>,
-    ) -> Result<impl Stream<Item = Result<WsEvent>> + Unpin> {
+    ) -> Result<impl Stream<Item = Result<ServerEvent>> + Unpin> {
         let url = format!("ws://{}/_blah/ws", self.domain());
         let (mut ws, _) = tokio_tungstenite::connect_async(url).await.unwrap();
         if let Some(user) = auth_user {
@@ -180,7 +175,7 @@ impl Server {
                 if wsmsg.is_close() {
                     return Ok(None);
                 }
-                let event = serde_json::from_slice::<WsEvent>(&wsmsg.into_data())?;
+                let event = serde_json::from_slice::<ServerEvent>(&wsmsg.into_data())?;
                 Ok(Some(event))
             })
             .filter_map(|ret| std::future::ready(ret.transpose())))
@@ -1530,7 +1525,7 @@ async fn event(server: Server) {
     {
         let chat = server.post_chat(rid1, &ALICE, "alice1").await.unwrap();
         let got = ws.next().await.unwrap().unwrap();
-        assert_eq!(got, WsEvent::Msg(chat.msg));
+        assert_eq!(got, ServerEvent::Msg(chat.msg));
     }
 
     // Should receive msgs from other user.
@@ -1541,7 +1536,7 @@ async fn event(server: Server) {
             .unwrap();
         let chat = server.post_chat(rid1, &BOB, "bob1").await.unwrap();
         let got = ws.next().await.unwrap().unwrap();
-        assert_eq!(got, WsEvent::Msg(chat.msg));
+        assert_eq!(got, ServerEvent::Msg(chat.msg));
     }
 
     // Should receive msgs from new room.
@@ -1552,7 +1547,7 @@ async fn event(server: Server) {
     {
         let chat = server.post_chat(rid2, &ALICE, "alice2").await.unwrap();
         let got = ws.next().await.unwrap().unwrap();
-        assert_eq!(got, WsEvent::Msg(chat.msg));
+        assert_eq!(got, ServerEvent::Msg(chat.msg));
     }
 
     // Each streams should receive each message once.
@@ -1561,9 +1556,9 @@ async fn event(server: Server) {
 
         let chat = server.post_chat(rid1, &ALICE, "alice1").await.unwrap();
         let got1 = ws.next().await.unwrap().unwrap();
-        assert_eq!(got1, WsEvent::Msg(chat.msg.clone()));
+        assert_eq!(got1, ServerEvent::Msg(chat.msg.clone()));
         let got2 = ws2.next().await.unwrap().unwrap();
-        assert_eq!(got2, WsEvent::Msg(chat.msg));
+        assert_eq!(got2, ServerEvent::Msg(chat.msg));
     }
 }
 

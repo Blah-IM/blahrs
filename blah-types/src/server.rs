@@ -1,10 +1,48 @@
 //! Data types and constants for Chat Server interaction.
 
+use std::fmt;
+
 use serde::{Deserialize, Serialize};
 use url::Url;
 
-use crate::msg::{Id, MemberPermission, RoomAttrs, SignedChatMsgWithId};
+use crate::msg::{Id, MemberPermission, RoomAttrs, SignedChatMsg, SignedChatMsgWithId};
 use crate::PubKey;
+
+/// The response object returned as body on HTTP error status.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ErrorResponse<S = String> {
+    /// The error object.
+    pub error: ErrorObject<S>,
+}
+
+/// The response object of `/_blah/user/me` endpoint on HTTP error status.
+/// It contains additional registration information.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ErrorResponseWithChallenge<S> {
+    /// The error object.
+    pub error: ErrorObject<S>,
+
+    /// The challenge metadata returned by the `/_blah/user/me` endpoint for registration.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub register_challenge: Option<UserRegisterChallenge>,
+}
+
+/// The error object.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ErrorObject<S = String> {
+    /// A machine-readable error code string.
+    pub code: S,
+    /// A human-readable error message.
+    pub message: S,
+}
+
+impl<S: fmt::Display> fmt::Display for ErrorObject<S> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "api error ({}): {}", self.code, self.message)
+    }
+}
+
+impl<S: fmt::Display + fmt::Debug> std::error::Error for ErrorObject<S> {}
 
 /// Metadata about the version and capabilities of a Chat Server.
 ///
@@ -46,6 +84,17 @@ pub enum UserRegisterChallenge {
     Unknown,
 }
 
+/// Response to list rooms.
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RoomList {
+    /// Result list of rooms.
+    pub rooms: Vec<RoomMetadata>,
+    /// The skip-token to fetch the next page.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub skip_token: Option<Id>,
+}
+
+/// The metadata of a room.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RoomMetadata {
     /// Room id.
@@ -75,3 +124,52 @@ pub struct RoomMetadata {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub peer_user: Option<PubKey>,
 }
+
+/// Response to list room msgs.
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RoomMsgs {
+    /// Result list of msgs.
+    pub msgs: Vec<SignedChatMsgWithId>,
+    /// The skip-token to fetch the next page.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub skip_token: Option<Id>,
+}
+
+/// Response to list room members.
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RoomMemberList {
+    /// Result list of members.
+    pub members: Vec<RoomMember>,
+    /// The skip-token to fetch the next page.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub skip_token: Option<Id>,
+}
+
+/// The description of a room member.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RoomMember {
+    /// The identity key of the member user.
+    pub id_key: PubKey,
+    /// The user permission in the room.
+    pub permission: MemberPermission,
+    /// The user's last seen message `cid` in the room.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_seen_cid: Option<Id>,
+}
+
+/// A server-to-client event.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ServerEvent {
+    /// A message from a joined room.
+    // FIXME: Include cid.
+    Msg(SignedChatMsg),
+    /// The receiver is too slow to receive and some events and are dropped.
+    // FIXME: Should we indefinitely buffer them or just disconnect the client instead?
+    Lagged,
+}
+
+/// A client-to-server event.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ClientEvent {}
