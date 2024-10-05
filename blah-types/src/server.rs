@@ -18,7 +18,7 @@ pub struct ErrorResponse<S = String> {
 /// The response object of `/_blah/user/me` endpoint on HTTP error status.
 /// It contains additional registration information.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ErrorResponseWithChallenge<S> {
+pub struct ErrorResponseWithChallenge<S = String> {
     /// The error object.
     pub error: ErrorObject<S>,
 
