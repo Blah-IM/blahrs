@@ -13,7 +13,7 @@ use axum_extra::extract::WithRejection as R;
 use blah_types::msg::{
     ChatPayload, CreateGroup, CreatePeerChat, CreateRoomPayload, DeleteRoomPayload,
     MemberPermission, RoomAdminOp, RoomAdminPayload, RoomAttrs, ServerPermission,
-    SignedChatMsgWithId,
+    SignedChatMsgWithId, WithMsgId,
 };
 use blah_types::server::{
     ErrorResponseWithChallenge, RoomList, RoomMember, RoomMemberList, RoomMetadata, RoomMsgs,
@@ -460,7 +460,7 @@ async fn post_room_msg(
     })?;
 
     // FIXME: Optimize this to not traverses over all members.
-    st.event.on_room_msg(chat, members);
+    st.event.on_room_msg(WithMsgId::new(cid, chat), members);
 
     Ok(Json(cid))
 }

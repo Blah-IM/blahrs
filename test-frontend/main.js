@@ -331,14 +331,15 @@ async function connectServer(newServerUrl) {
     };
     ws.onmessage = async (e) => {
         console.log('ws event', e.data);
-        const msg = JSON.parse(e.data);
-        if (msg.msg !== undefined) {
-            if (msg.msg.signee.payload.room === curRoom) {
-                await showChatMsg(msg.msg);
+        const evt = JSON.parse(e.data);
+        if (evt.msg !== undefined) {
+            if (evt.msg.signee.payload.room === curRoom) {
+                lastCid = evt.msg.cid;
+                await showChatMsg(evt.msg);
             } else {
                 console.log('ignore background room msg');
             }
-        } else if (msg.lagged !== undefined) {
+        } else if (evt.lagged !== undefined) {
             log('some events are dropped because of queue overflow')
         } else {
             log(`unknown ws msg: ${e.data}`);

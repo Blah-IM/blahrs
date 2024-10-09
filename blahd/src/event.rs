@@ -11,7 +11,7 @@ use anyhow::{bail, Context as _, Result};
 use axum::extract::ws::{close_code, CloseFrame, Message, WebSocket};
 use axum::extract::WebSocketUpgrade;
 use axum::response::Response;
-use blah_types::msg::{AuthPayload, SignedChatMsg};
+use blah_types::msg::{AuthPayload, SignedChatMsgWithId};
 use blah_types::server::{ClientEvent, ServerEvent};
 use blah_types::Signed;
 use futures_util::future::Either;
@@ -58,7 +58,7 @@ pub struct State {
 }
 
 impl State {
-    pub fn on_room_msg(&self, msg: SignedChatMsg, room_members: Vec<i64>) {
+    pub fn on_room_msg(&self, msg: SignedChatMsgWithId, room_members: Vec<i64>) {
         let listeners = self.user_listeners.lock();
         let mut cnt = 0usize;
         let msg = Arc::new(ServerEvent::Msg(msg));

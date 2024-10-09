@@ -1525,7 +1525,7 @@ async fn event(server: Server) {
     {
         let chat = server.post_chat(rid1, &ALICE, "alice1").await.unwrap();
         let got = ws.next().await.unwrap().unwrap();
-        assert_eq!(got, ServerEvent::Msg(chat.msg));
+        assert_eq!(got, ServerEvent::Msg(chat));
     }
 
     // Should receive msgs from other user.
@@ -1536,7 +1536,7 @@ async fn event(server: Server) {
             .unwrap();
         let chat = server.post_chat(rid1, &BOB, "bob1").await.unwrap();
         let got = ws.next().await.unwrap().unwrap();
-        assert_eq!(got, ServerEvent::Msg(chat.msg));
+        assert_eq!(got, ServerEvent::Msg(chat));
     }
 
     // Should receive msgs from new room.
@@ -1547,7 +1547,7 @@ async fn event(server: Server) {
     {
         let chat = server.post_chat(rid2, &ALICE, "alice2").await.unwrap();
         let got = ws.next().await.unwrap().unwrap();
-        assert_eq!(got, ServerEvent::Msg(chat.msg));
+        assert_eq!(got, ServerEvent::Msg(chat));
     }
 
     // Each streams should receive each message once.
@@ -1556,9 +1556,9 @@ async fn event(server: Server) {
 
         let chat = server.post_chat(rid1, &ALICE, "alice1").await.unwrap();
         let got1 = ws.next().await.unwrap().unwrap();
-        assert_eq!(got1, ServerEvent::Msg(chat.msg.clone()));
+        assert_eq!(got1, ServerEvent::Msg(chat.clone()));
         let got2 = ws2.next().await.unwrap().unwrap();
-        assert_eq!(got2, ServerEvent::Msg(chat.msg));
+        assert_eq!(got2, ServerEvent::Msg(chat));
     }
 }
 

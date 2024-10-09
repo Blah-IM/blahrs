@@ -574,7 +574,7 @@ components:
         - type: object
           properties:
             chat:
-              $ref: '#/components/schemas/Signed-Chat'
+              $ref: '#/components/schemas/WithMsgId-Signed-Chat'
 
         - type: object
           properties:

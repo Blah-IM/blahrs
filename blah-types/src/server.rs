@@ -5,7 +5,7 @@ use std::fmt;
 use serde::{Deserialize, Serialize};
 use url::Url;
 
-use crate::msg::{Id, MemberPermission, RoomAttrs, SignedChatMsg, SignedChatMsgWithId};
+use crate::msg::{Id, MemberPermission, RoomAttrs, SignedChatMsgWithId};
 use crate::PubKey;
 
 /// The response object returned as body on HTTP error status.
@@ -162,8 +162,7 @@ pub struct RoomMember {
 #[serde(rename_all = "snake_case")]
 pub enum ServerEvent {
     /// A message from a joined room.
-    // FIXME: Include cid.
-    Msg(SignedChatMsg),
+    Msg(SignedChatMsgWithId),
     /// The receiver is too slow to receive and some events and are dropped.
     // FIXME: Should we indefinitely buffer them or just disconnect the client instead?
     Lagged,
