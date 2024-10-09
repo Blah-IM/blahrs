@@ -459,20 +459,8 @@ async fn post_room_msg(
         Ok((cid, members))
     })?;
 
-    let chat = Arc::new(chat);
     // FIXME: Optimize this to not traverses over all members.
-    let listeners = st.event.user_listeners.lock();
-    let mut cnt = 0usize;
-    for uid in members {
-        if let Some(tx) = listeners.get(&uid) {
-            if tx.send(chat.clone()).is_ok() {
-                cnt += 1;
-            }
-        }
-    }
-    if cnt != 0 {
-        tracing::debug!("broadcasted event to {cnt} clients");
-    }
+    st.event.on_room_msg(chat, members);
 
     Ok(Json(cid))
 }
