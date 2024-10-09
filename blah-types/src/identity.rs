@@ -89,7 +89,6 @@ impl UserIdentityDesc {
     }
 }
 
-// TODO: JWS or alike?
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "typ", rename = "user_act_key")]
 pub struct UserActKeyDesc {

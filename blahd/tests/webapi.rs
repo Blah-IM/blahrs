@@ -417,7 +417,7 @@ fn server() -> Server {
     server_with(db, &CONFIG)
 }
 
-// TODO: Testing config is hard to build because it does have a `Default` impl.
+// TODO: Testing config is hard to build because it lacks a `Default` impl.
 #[track_caller]
 fn server_with(db: Database, config: &dyn Fn(u16) -> String) -> Server {
     // Use std's to avoid async, since we need no name resolution.
@@ -1215,7 +1215,6 @@ async fn register_flow(server: Server) {
     req.server_url = BASE_URL.parse().unwrap();
 
     // Trailing dot in id_url.
-    // TODO: Rule this out in `IdUrl` parser?
     register_fast(&req)
         .await
         .expect_api_err(StatusCode::FORBIDDEN, "disabled");

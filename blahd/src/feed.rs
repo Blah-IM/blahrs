@@ -176,7 +176,6 @@ impl fmt::Display for AtomFeed {
                 r#"  <link rel="next" type="application/atom+xml" href="{esc_next_url}"/>"#
             )?;
         }
-        // TODO: HTML links.
 
         for msg in msgs {
             let content = &msg.msg.signee.payload.rich_text;

@@ -31,7 +31,7 @@ let
   settingsType = types.submodule {
     freeformType = toml.type;
 
-    # TODO: Auto-generate these options? Now only required options are documented.
+    # TODO: Auto-generate these options?
     options = { };
   };
 

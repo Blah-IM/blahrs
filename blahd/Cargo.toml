@@ -12,7 +12,7 @@ anyhow = "1"
 axum = { version = "0.7", features = ["ws"] }
 axum-extra = "0.9"
 clap = { version = "4", features = ["derive"] }
-data-encoding = "2" # TODO: Also use it for hex?
+data-encoding = "2"
 ed25519-dalek = "2"
 futures-util = "0.3"
 hex = { version = "0.4", features = ["serde"] }
