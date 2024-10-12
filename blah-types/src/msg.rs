@@ -365,11 +365,19 @@ pub struct AddMemberPayload {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "typ", rename_all = "snake_case", rename = "update_member")]
+pub struct UpdateMemberPayload {
+    pub room: Id,
+    #[serde(flatten)]
+    pub member: RoomMember,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum RoomAdminOp {
     AddMember(AddMemberPayload),
     RemoveMember(RemoveMemberPayload),
-    // TODO: RU
+    // TODO: R
 }
 
 bitflags::bitflags! {
@@ -394,6 +402,7 @@ bitflags::bitflags! {
         // TODO: Should we have multiple levels of removal permission, so that admins
         // may not remove all other admins?
         const REMOVE_MEMBER = 1 << 4;
+        const UPDATE_MEMBER = 1 << 5;
 
         const MAX_SELF_ADD = Self::POST_CHAT.bits();
         const MAX_PEER_CHAT = Self::POST_CHAT.bits() | Self::DELETE_ROOM.bits() | Self::LIST_MEMBERS.bits();

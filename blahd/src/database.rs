@@ -547,6 +547,22 @@ pub trait TransactionOps {
         Ok(())
     }
 
+    fn update_room_member(&self, rid: Id, uid: i64, perm: MemberPermission) -> Result<()> {
+        let updated = prepare_cached_and_bind!(
+            self.conn(),
+            r"
+            UPDATE `room_member` SET
+                `permission` = :perm
+            WHERE (`rid`, `uid`) = (:rid, :uid)
+            "
+        )
+        .raw_execute()?;
+        if updated != 1 {
+            return Err(ApiError::UserNotFound);
+        }
+        Ok(())
+    }
+
     fn remove_room_member(&self, rid: Id, uid: i64) -> Result<()> {
         // TODO: Check if it is the last member?
         let updated = prepare_cached_and_bind!(

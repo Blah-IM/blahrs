@@ -12,8 +12,8 @@ use blah_types::identity::{IdUrl, UserActKeyDesc, UserIdentityDesc, UserProfile}
 use blah_types::msg::{
     self, AddMemberPayload, AuthPayload, ChatPayload, CreateGroup, CreatePeerChat,
     CreateRoomPayload, DeleteRoomPayload, MemberPermission, RemoveMemberPayload, RichText,
-    RoomAttrs, ServerPermission, SignedChatMsg, SignedChatMsgWithId, UserRegisterChallengeResponse,
-    UserRegisterPayload, WithMsgId,
+    RoomAttrs, ServerPermission, SignedChatMsg, SignedChatMsgWithId, UpdateMemberPayload,
+    UserRegisterChallengeResponse, UserRegisterPayload, WithMsgId,
 };
 use blah_types::server::{
     RoomList, RoomMember, RoomMemberList, RoomMetadata, RoomMsgs, ServerEvent, ServerMetadata,
@@ -339,6 +339,33 @@ impl Server {
         );
         self.request::<_, NoContent>(
             Method::DELETE,
+            &format!("/room/{rid}/member/{tgt_user_id}"),
+            None,
+            Some(req),
+        )
+        .map_ok(|None| {})
+    }
+
+    fn update_member_perm(
+        &self,
+        rid: Id,
+        act_user: &User,
+        tgt_user: &User,
+        permission: MemberPermission,
+    ) -> impl Future<Output = Result<()>> + use<'_> {
+        let tgt_user_id = tgt_user.pubkeys.id_key.clone();
+        let req = self.sign(
+            act_user,
+            UpdateMemberPayload {
+                room: rid,
+                member: msg::RoomMember {
+                    permission,
+                    user: tgt_user_id.clone(),
+                },
+            },
+        );
+        self.request::<_, NoContent>(
+            Method::PATCH,
             &format!("/room/{rid}/member/{tgt_user_id}"),
             None,
             Some(req),
@@ -1639,7 +1666,7 @@ async fn room_member(server: Server) {
 
 #[rstest]
 #[tokio::test]
-async fn room_management(server: Server) {
+async fn room_mgmt_remove(server: Server) {
     let rid = server
         .create_room(&ALICE, RoomAttrs::PUBLIC_JOINABLE, "public")
         .await
@@ -1680,4 +1707,61 @@ async fn room_management(server: Server) {
         .get::<RoomMetadata>(&format!("/room/{rid}"), Some(&auth(&BOB)))
         .await
         .expect_api_err(StatusCode::NOT_FOUND, "room_not_found");
+}
+
+#[rstest]
+#[tokio::test]
+async fn room_mgmt_update_perm(server: Server) {
+    let rid = server
+        .create_room(&ALICE, RoomAttrs::PUBLIC_JOINABLE, "public")
+        .await
+        .unwrap();
+    server
+        .join_room(rid, &BOB, MemberPermission::MAX_SELF_ADD)
+        .await
+        .unwrap();
+
+    // OK, Alice grants Bob permission to change permission.
+    server
+        .update_member_perm(
+            rid,
+            &ALICE,
+            &BOB,
+            MemberPermission::POST_CHAT | MemberPermission::UPDATE_MEMBER,
+        )
+        .await
+        .unwrap();
+
+    // Cannot restrict a member with higher permission.
+    server
+        .update_member_perm(rid, &BOB, &ALICE, MemberPermission::empty())
+        .await
+        .expect_api_err(StatusCode::FORBIDDEN, "permission_denied");
+
+    // OK, Bob restrict themself.
+    server
+        .update_member_perm(rid, &BOB, &BOB, MemberPermission::empty())
+        .await
+        .unwrap();
+
+    // Cannot self-grant permission.
+    server
+        .update_member_perm(rid, &BOB, &BOB, MemberPermission::POST_CHAT)
+        .await
+        .expect_api_err(StatusCode::FORBIDDEN, "permission_denied");
+
+    // Bob cannot chat now.
+    server
+        .post_chat(rid, &BOB, "no")
+        .await
+        .expect_api_err(StatusCode::FORBIDDEN, "permission_denied");
+
+    // OK, Alice grants Bob permission.
+    server
+        .update_member_perm(rid, &ALICE, &BOB, MemberPermission::POST_CHAT)
+        .await
+        .unwrap();
+
+    // Bob can chat again.
+    server.post_chat(rid, &BOB, "yay").await.unwrap();
 }

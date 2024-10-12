@@ -594,7 +594,38 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiError'
 
-  /_blah/room/{rid}/member/{target_id_key}:
+  /_blah/room/{rid}/member/{member_id_key}:
+    patch:
+      summary: Update permission of a room member
+
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Signed-UpdateMember'
+
+      responses:
+        204:
+          description: Operation completed.
+
+        403:
+          description: |
+            The user does not have permission to update permission of the
+            given user.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+
+        404:
+          description: |
+            Room does not exist, the user does not have permission for the
+            operation, or the operand user is not a room member.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+
     delete:
       summary: Remove a room member.
 
@@ -868,6 +899,38 @@ components:
                 typ:
                   type: string
                   const: 'add_member'
+                room:
+                  type: string
+                permission:
+                  type: integer
+                  format: int32
+                user:
+                  type: string
+
+    Signed-UpdateMember:
+      type: object
+      properties:
+        sig:
+          type: string
+        signee:
+          type: object
+          properties:
+            nonce:
+              type: integer
+              format: uint32
+            timestamp:
+              type: integer
+              format: uint64
+            id_key:
+              type: string
+            act_key:
+              type: string
+            payload:
+              type: object
+              properties:
+                typ:
+                  type: string
+                  const: 'update_member'
                 room:
                   type: string
                 permission:

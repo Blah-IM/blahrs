@@ -13,7 +13,7 @@ use axum_extra::extract::WithRejection as R;
 use blah_types::msg::{
     AddMemberPayload, ChatPayload, CreateGroup, CreatePeerChat, CreateRoomPayload,
     DeleteRoomPayload, MemberPermission, RemoveMemberPayload, RoomAdminOp, RoomAdminPayload,
-    RoomAttrs, ServerPermission, SignedChatMsgWithId, WithMsgId,
+    RoomAttrs, ServerPermission, SignedChatMsgWithId, UpdateMemberPayload, WithMsgId,
 };
 use blah_types::server::{
     ErrorResponseWithChallenge, RoomList, RoomMember, RoomMemberList, RoomMetadata, RoomMsgs,
@@ -171,7 +171,7 @@ pub fn router(st: Arc<AppState>) -> Router {
         // TODO!: remove this.
         .route("/room/:rid/admin", post(post_room_admin))
         .route("/room/:rid/member", get(list_room_member).post(post_room_member))
-        .route("/room/:rid/member/:uid", delete(delete_room_member))
+        .route("/room/:rid/member/:uid", delete(delete_room_member).patch(patch_room_member))
         ;
 
     let router = router
@@ -556,6 +556,39 @@ async fn delete_room_member(
             txn.get_room_member_by_id_key(rid, &tgt_user)?.0
         };
         txn.remove_room_member(rid, tgt_uid)?;
+        Ok(NoContent)
+    })
+}
+
+async fn patch_room_member(
+    st: ArcState,
+    R(Path((rid, id_key)), _): RE<Path<(Id, PubKey)>>,
+    SignedJson(op): SignedJson<UpdateMemberPayload>,
+) -> Result<NoContent, ApiError> {
+    api_ensure!(rid == op.signee.payload.room, "room id mismatch with URI");
+    api_ensure!(!rid.is_peer_chat(), "cannot operate on a peer chat room");
+    let op_member = op.signee.payload.member;
+    api_ensure!(id_key == op_member.user, "user id mismatch with URI");
+
+    st.db.with_write(|txn| {
+        let (_src_uid, src_perm, ..) = txn.get_room_member(rid, &op.signee.user)?;
+        api_ensure!(
+            src_perm.contains(MemberPermission::UPDATE_MEMBER),
+            ApiError::PermissionDenied("the user does not have permission to update permissions")
+        );
+        api_ensure!(
+            src_perm.contains(op_member.permission),
+            ApiError::PermissionDenied("cannot set a permission higher than setter's")
+        );
+        let (tgt_uid, tgt_prev_perm, ..) = txn.get_room_member_by_id_key(rid, &op_member.user)?;
+        api_ensure!(
+            src_perm.contains(tgt_prev_perm),
+            ApiError::PermissionDenied(
+                "cannot update a member having higher permission than setter's"
+            ),
+        );
+        // Checked to exist.
+        txn.update_room_member(rid, tgt_uid, op_member.permission)?;
         Ok(NoContent)
     })
 }
