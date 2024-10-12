@@ -224,7 +224,6 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiError'
 
-  /_blah/room/create:
     post:
       summary: Create a room
 
@@ -271,6 +270,13 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
+
+  /_blah/room/create:
+    post:
+      summary: Create a room (legacy)
+      deprecated: true
+      description: |
+        Alias of POST `/_blah/room`.
 
   /_blah/room/{rid}:
     get:

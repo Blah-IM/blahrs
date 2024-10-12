@@ -263,7 +263,7 @@ impl Server {
         );
         async move {
             Ok(self
-                .request(Method::POST, "/room/create", None, Some(&req))
+                .request(Method::POST, "/room", None, Some(&req))
                 .await?
                 .unwrap())
         }
@@ -282,7 +282,7 @@ impl Server {
         );
         async move {
             Ok(self
-                .request(Method::POST, "/room/create", None, Some(&req))
+                .request(Method::POST, "/room", None, Some(&req))
                 .await?
                 .unwrap())
         }

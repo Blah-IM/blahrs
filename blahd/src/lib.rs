@@ -160,9 +160,9 @@ pub fn router(st: Arc<AppState>) -> Router {
         .route("/server", get(get_server_metadata))
         .route("/ws", get(event::get_ws))
         .route("/user/me", get(get_user).post(register::post_user))
-        .route("/room", get(list_room))
-        // TODO: Maybe just POST on `/room`?
-        .route("/room/create", post(post_room_create))
+        .route("/room", get(list_room).post(post_room))
+        // TODO!: remove this.
+        .route("/room/create", post(post_room))
         .route("/room/:rid", get(get_room).delete(delete_room))
         .route("/room/:rid/feed.json", get(feed::get_room_feed::<feed::JsonFeed>))
         .route("/room/:rid/feed.atom", get(feed::get_room_feed::<feed::AtomFeed>))
@@ -285,7 +285,7 @@ async fn list_room(
     Ok(Json(RoomList { rooms, skip_token }))
 }
 
-async fn post_room_create(
+async fn post_room(
     st: ArcState,
     SignedJson(params): SignedJson<CreateRoomPayload>,
 ) -> Result<Json<Id>, ApiError> {
