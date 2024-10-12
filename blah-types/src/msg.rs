@@ -387,8 +387,13 @@ bitflags::bitflags! {
     pub struct MemberPermission: i32 {
         const POST_CHAT = 1 << 0;
         const ADD_MEMBER = 1 << 1;
+        // TODO: Group admin permissions together.
         const DELETE_ROOM = 1 << 2;
         const LIST_MEMBERS = 1 << 3;
+
+        // TODO: Should we have multiple levels of removal permission, so that admins
+        // may not remove all other admins?
+        const REMOVE_MEMBER = 1 << 4;
 
         const MAX_SELF_ADD = Self::POST_CHAT.bits();
         const MAX_PEER_CHAT = Self::POST_CHAT.bits() | Self::DELETE_ROOM.bits() | Self::LIST_MEMBERS.bits();

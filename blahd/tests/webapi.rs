@@ -320,17 +320,26 @@ impl Server {
     }
 
     fn leave_room(&self, rid: Id, user: &User) -> impl Future<Output = Result<()>> + use<'_> {
-        let user_id = user.pubkeys.id_key.clone();
+        self.remove_member(rid, user, user)
+    }
+
+    fn remove_member(
+        &self,
+        rid: Id,
+        act_user: &User,
+        tgt_user: &User,
+    ) -> impl Future<Output = Result<()>> + use<'_> {
+        let tgt_user_id = tgt_user.pubkeys.id_key.clone();
         let req = self.sign(
-            user,
+            act_user,
             RemoveMemberPayload {
                 room: rid,
-                user: user_id.clone(),
+                user: tgt_user_id.clone(),
             },
         );
         self.request::<_, NoContent>(
             Method::DELETE,
-            &format!("/room/{rid}/member/{user_id}"),
+            &format!("/room/{rid}/member/{tgt_user_id}"),
             None,
             Some(req),
         )
@@ -1626,4 +1635,49 @@ async fn room_member(server: Server) {
         skip_token: None,
     };
     assert_eq!(got, expect);
+}
+
+#[rstest]
+#[tokio::test]
+async fn room_management(server: Server) {
+    let rid = server
+        .create_room(&ALICE, RoomAttrs::PUBLIC_JOINABLE, "public")
+        .await
+        .unwrap();
+    server
+        .join_room(rid, &BOB, MemberPermission::MAX_SELF_ADD)
+        .await
+        .unwrap();
+    // Now bob can access the room.
+    server
+        .get::<RoomMetadata>(&format!("/room/{rid}"), Some(&auth(&BOB)))
+        .await
+        .unwrap();
+
+    // No permission.
+    server
+        .remove_member(rid, &BOB, &ALICE)
+        .await
+        .expect_api_err(StatusCode::FORBIDDEN, "permission_denied");
+
+    // Invalid act user.
+    server
+        .remove_member(rid, &CAROL, &BOB)
+        .await
+        .expect_api_err(StatusCode::NOT_FOUND, "room_not_found");
+
+    // Invalid operand user.
+    server
+        .remove_member(rid, &ALICE, &CAROL)
+        .await
+        .expect_api_err(StatusCode::NOT_FOUND, "member_not_found");
+
+    // OK, removed.
+    server.remove_member(rid, &ALICE, &BOB).await.unwrap();
+
+    // Bob cannot access the room now.
+    server
+        .get::<RoomMetadata>(&format!("/room/{rid}"), Some(&auth(&BOB)))
+        .await
+        .expect_api_err(StatusCode::NOT_FOUND, "room_not_found");
 }

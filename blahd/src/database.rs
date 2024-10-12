@@ -220,6 +220,26 @@ pub trait TransactionOps {
         .and_then(|row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
     }
 
+    fn get_room_member_by_id_key(
+        &self,
+        rid: Id,
+        id_key: &PubKey,
+    ) -> Result<(i64, MemberPermission, Id)> {
+        prepare_cached_and_bind!(
+            self.conn(),
+            r"
+            SELECT `uid`, `room_member`.`permission`, `last_seen_cid`
+            FROM `room_member`
+            JOIN `user` USING (`uid`)
+            WHERE (`rid`, `id_key`) = (:rid, :id_key)
+            "
+        )
+        .raw_query()
+        .next()?
+        .ok_or(ApiError::MemberNotFound)
+        .and_then(|row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
+    }
+
     fn get_room_having(&self, rid: Id, filter: RoomAttrs) -> Result<(RoomAttrs, Option<String>)> {
         prepare_cached_and_bind!(
             self.conn(),
@@ -527,7 +547,7 @@ pub trait TransactionOps {
         Ok(())
     }
 
-    fn remove_room_member(&self, rid: Id, uid: i64) -> Result<bool> {
+    fn remove_room_member(&self, rid: Id, uid: i64) -> Result<()> {
         // TODO: Check if it is the last member?
         let updated = prepare_cached_and_bind!(
             self.conn(),
@@ -537,7 +557,10 @@ pub trait TransactionOps {
             "
         )
         .raw_execute()?;
-        Ok(updated == 1)
+        if updated != 1 {
+            return Err(ApiError::UserNotFound);
+        }
+        Ok(())
     }
 
     fn add_room_chat_msg(&self, rid: Id, uid: i64, cid: Id, chat: &SignedChatMsg) -> Result<()> {

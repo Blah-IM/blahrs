@@ -539,17 +539,23 @@ async fn delete_room_member(
     );
     let tgt_user = op.signee.payload.user;
     api_ensure!(id_key == tgt_user, "user id mismatch with URI");
-    api_ensure!(
-        op.signee.user.id_key == tgt_user,
-        ApiError::NotImplemented("only self-removal is implemented yet"),
-    );
+    let is_self_removal = op.signee.user.id_key == tgt_user;
 
     st.db.with_write(|txn| {
-        let (uid, ..) = txn.get_room_member(rid, &op.signee.user)?;
+        let (uid, perm, _) = txn.get_room_member(rid, &op.signee.user)?;
+        api_ensure!(
+            is_self_removal || perm.contains(MemberPermission::REMOVE_MEMBER),
+            ApiError::PermissionDenied("the user does not have permission to remove members")
+        );
         let (attrs, _) = txn.get_room_having(rid, RoomAttrs::empty())?;
         // Sanity check.
         assert!(!attrs.contains(RoomAttrs::PEER_CHAT));
-        txn.remove_room_member(rid, uid)?;
+        let tgt_uid = if is_self_removal {
+            uid
+        } else {
+            txn.get_room_member_by_id_key(rid, &tgt_user)?.0
+        };
+        txn.remove_room_member(rid, tgt_uid)?;
         Ok(NoContent)
     })
 }

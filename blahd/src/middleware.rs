@@ -66,6 +66,7 @@ pub enum ApiError {
     UserNotFound = (StatusCode::NOT_FOUND, "the user does not exist"),
     RoomNotFound = (StatusCode::NOT_FOUND, "the room does not exist or the user is not a room member"),
     PeerUserNotFound = (StatusCode::NOT_FOUND, "peer user does not exist or disallows peer chat"),
+    MemberNotFound = (StatusCode::NOT_FOUND, "the operand user is not a room member"),
     Conflict(&'static str) = (StatusCode::CONFLICT),
     Exists(&'static str) = (StatusCode::CONFLICT),
     FetchIdDescription(Box<str>) = (StatusCode::UNPROCESSABLE_ENTITY),
