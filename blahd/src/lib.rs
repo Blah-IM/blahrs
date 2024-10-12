@@ -8,6 +8,7 @@ use axum::body::Bytes;
 use axum::extract::{Path, Query, State};
 use axum::http::{header, HeaderName, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
+use axum::routing::MethodRouter;
 use axum::{Json, Router};
 use axum_extra::extract::WithRejection as R;
 use blah_types::msg::{
@@ -149,7 +150,7 @@ impl AppState {
 type ArcState = State<Arc<AppState>>;
 
 pub fn router(st: Arc<AppState>) -> Router {
-    use axum::routing::{get, post};
+    let r = || MethodRouter::new().fallback(fallback_method_route);
 
     // NB. Use consistent handler naming: `<method>_<path>[_<details>]`.
     // Use prefix `list` for GET with pagination.
@@ -157,21 +158,22 @@ pub fn router(st: Arc<AppState>) -> Router {
     // One route per line.
     #[rustfmt::skip]
     let router = Router::new()
-        .route("/server", get(get_server_metadata))
-        .route("/ws", get(event::get_ws))
-        .route("/user/me", get(get_user).post(register::post_user))
-        .route("/room", get(list_room).post(post_room))
+        .route("/server", r().get(get_server_metadata))
+        .route("/ws", r().get(event::get_ws))
+        .route("/user/me", r().get(get_user).post(register::post_user))
+        .route("/room", r().get(list_room).post(post_room))
         // TODO!: remove this.
-        .route("/room/create", post(post_room))
-        .route("/room/:rid", get(get_room).delete(delete_room))
-        .route("/room/:rid/feed.json", get(feed::get_room_feed::<feed::JsonFeed>))
-        .route("/room/:rid/feed.atom", get(feed::get_room_feed::<feed::AtomFeed>))
-        .route("/room/:rid/msg", get(list_room_msg).post(post_room_msg))
-        .route("/room/:rid/msg/:cid/seen", post(post_room_msg_seen))
+        .route("/room/create", r().post(post_room))
+        .route("/room/:rid", r().get(get_room).delete(delete_room))
+        .route("/room/:rid/feed.json", r().get(feed::get_room_feed::<feed::JsonFeed>))
+        .route("/room/:rid/feed.atom", r().get(feed::get_room_feed::<feed::AtomFeed>))
+        .route("/room/:rid/msg", r().get(list_room_msg).post(post_room_msg))
+        .route("/room/:rid/msg/:cid/seen", r().post(post_room_msg_seen))
         // TODO!: remove this.
-        .route("/room/:rid/admin", post(post_room_admin))
-        .route("/room/:rid/member", get(list_room_member).post(post_room_member))
-        .route("/room/:rid/member/:uid", get(get_room_member).delete(delete_room_member).patch(patch_room_member))
+        .route("/room/:rid/admin", r().post(post_room_admin))
+        .route("/room/:rid/member", r().get(list_room_member).post(post_room_member))
+        .route("/room/:rid/member/:uid", r().get(get_room_member).delete(delete_room_member).patch(patch_room_member))
+        .fallback(fallback_route)
         ;
 
     let router = router
@@ -195,6 +197,14 @@ pub fn router(st: Arc<AppState>) -> Router {
 }
 
 type RE<T> = R<T, ApiError>;
+
+async fn fallback_route() -> ApiError {
+    ApiError::UnknownRoute
+}
+
+async fn fallback_method_route() -> ApiError {
+    ApiError::UnknownMethod
+}
 
 async fn get_server_metadata(State(st): ArcState) -> Response {
     let (json, etag) = st.server_metadata.clone();

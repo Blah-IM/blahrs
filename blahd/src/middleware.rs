@@ -74,6 +74,9 @@ pub enum ApiError {
 
     ServerError = (StatusCode::INTERNAL_SERVER_ERROR, "internal server error"),
     NotImplemented(&'static str) = (StatusCode::NOT_IMPLEMENTED),
+
+    UnknownRoute = (StatusCode::NOT_FOUND, "unknown route"),
+    UnknownMethod = (StatusCode::METHOD_NOT_ALLOWED, "unknown method for the route"),
 }
 
 }
