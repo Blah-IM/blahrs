@@ -595,6 +595,32 @@ paths:
                 $ref: '#/components/schemas/ApiError'
 
   /_blah/room/{rid}/member/{member_id_key}:
+    get:
+      summary: Get information of a room member
+
+      parameters:
+        - name: Authorization
+          in: header
+          description: User authentication token.
+          schema:
+            $ref: '#/components/schemas/Signed-Auth'
+
+      responses:
+        200:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RoomMember'
+
+        404:
+          description: |
+            Room does not exist, the user does not have permission for the
+            operation, or the operand user is not a room member.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+
     patch:
       summary: Update permission of a room member
 

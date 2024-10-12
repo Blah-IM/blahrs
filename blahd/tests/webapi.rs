@@ -1711,7 +1711,7 @@ async fn room_mgmt_remove(server: Server) {
 
 #[rstest]
 #[tokio::test]
-async fn room_mgmt_update_perm(server: Server) {
+async fn room_mgmt_perm(server: Server) {
     let rid = server
         .create_room(&ALICE, RoomAttrs::PUBLIC_JOINABLE, "public")
         .await
@@ -1720,6 +1720,22 @@ async fn room_mgmt_update_perm(server: Server) {
         .join_room(rid, &BOB, MemberPermission::MAX_SELF_ADD)
         .await
         .unwrap();
+
+    let get_bob = || {
+        server.get::<RoomMember>(
+            &format!("/room/{rid}/member/{}", BOB.pubkeys.id_key),
+            Some(&auth(&BOB)),
+        )
+    };
+    // Initial permission.
+    assert_eq!(
+        get_bob().await.unwrap(),
+        RoomMember {
+            id_key: BOB.pubkeys.id_key.clone(),
+            permission: MemberPermission::MAX_SELF_ADD,
+            last_seen_cid: None,
+        }
+    );
 
     // OK, Alice grants Bob permission to change permission.
     server
@@ -1731,6 +1747,10 @@ async fn room_mgmt_update_perm(server: Server) {
         )
         .await
         .unwrap();
+    assert_eq!(
+        get_bob().await.unwrap().permission,
+        MemberPermission::POST_CHAT | MemberPermission::UPDATE_MEMBER
+    );
 
     // Cannot restrict a member with higher permission.
     server
@@ -1743,6 +1763,10 @@ async fn room_mgmt_update_perm(server: Server) {
         .update_member_perm(rid, &BOB, &BOB, MemberPermission::empty())
         .await
         .unwrap();
+    assert_eq!(
+        get_bob().await.unwrap().permission,
+        MemberPermission::empty(),
+    );
 
     // Cannot self-grant permission.
     server
@@ -1761,6 +1785,10 @@ async fn room_mgmt_update_perm(server: Server) {
         .update_member_perm(rid, &ALICE, &BOB, MemberPermission::POST_CHAT)
         .await
         .unwrap();
+    assert_eq!(
+        get_bob().await.unwrap().permission,
+        MemberPermission::POST_CHAT,
+    );
 
     // Bob can chat again.
     server.post_chat(rid, &BOB, "yay").await.unwrap();

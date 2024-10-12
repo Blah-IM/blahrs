@@ -149,7 +149,7 @@ impl AppState {
 type ArcState = State<Arc<AppState>>;
 
 pub fn router(st: Arc<AppState>) -> Router {
-    use axum::routing::{delete, get, post};
+    use axum::routing::{get, post};
 
     // NB. Use consistent handler naming: `<method>_<path>[_<details>]`.
     // Use prefix `list` for GET with pagination.
@@ -171,7 +171,7 @@ pub fn router(st: Arc<AppState>) -> Router {
         // TODO!: remove this.
         .route("/room/:rid/admin", post(post_room_admin))
         .route("/room/:rid/member", get(list_room_member).post(post_room_member))
-        .route("/room/:rid/member/:uid", delete(delete_room_member).patch(patch_room_member))
+        .route("/room/:rid/member/:uid", get(get_room_member).delete(delete_room_member).patch(patch_room_member))
         ;
 
     let router = router
@@ -524,6 +524,23 @@ async fn post_room_member(
         assert!(!attrs.contains(RoomAttrs::PEER_CHAT));
         txn.add_room_member(rid, uid, member.permission)?;
         Ok(NoContent)
+    })
+}
+
+async fn get_room_member(
+    st: ArcState,
+    R(Path((rid, id_key)), _): RE<Path<(Id, PubKey)>>,
+    Auth(user): Auth,
+) -> Result<Json<RoomMember>, ApiError> {
+    st.db.with_read(|txn| {
+        // Check membership.
+        let _ = txn.get_room_member(rid, &user)?;
+        let (_uid, permission, last_seen_cid) = txn.get_room_member_by_id_key(rid, &id_key)?;
+        Ok(Json(RoomMember {
+            id_key,
+            permission,
+            last_seen_cid: (last_seen_cid != Id(0)).then_some(last_seen_cid),
+        }))
     })
 }
 

@@ -377,7 +377,6 @@ pub struct UpdateMemberPayload {
 pub enum RoomAdminOp {
     AddMember(AddMemberPayload),
     RemoveMember(RemoveMemberPayload),
-    // TODO: R
 }
 
 bitflags::bitflags! {
