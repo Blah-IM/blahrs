@@ -70,11 +70,11 @@ in
     systemd.packages = [ cfg.package ];
     environment.systemPackages = [ cfg.package ];
 
-    systemd.services."blahd" = {
+    systemd.services."blahd" = lib.mkDefault {
       overrideStrategy = "asDropin";
 
       wantedBy = [ "multi-user.target" ];
-      restartIfChanged = false;
+      restartIfChanged = true; # We support graceful shutdown.
       stopIfChanged = false;
     };
 
