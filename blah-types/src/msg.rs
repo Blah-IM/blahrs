@@ -357,7 +357,7 @@ pub struct RemoveMemberPayload {
 
 // TODO: Maybe disallow adding other user without consent?
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "typ", rename_all = "snake_case")]
+#[serde(tag = "typ", rename_all = "snake_case", rename = "add_member")]
 pub struct AddMemberPayload {
     pub room: Id,
     #[serde(flatten)]
