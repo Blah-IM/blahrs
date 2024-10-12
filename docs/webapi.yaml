@@ -327,7 +327,11 @@ paths:
 
   /_blah/room/{rid}/admin:
     post:
-      summary: Room management
+      summary: Room management (legacy)
+      deprecated: true
+      description: |
+        Use POST `/_blah/room/{rid}/member` or
+        DELETE `/_blah/room/{rid}/member/{member_id_key}` instead.
 
       requestBody:
         content:
@@ -561,6 +565,67 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiError'
 
+    post:
+      summary: Join a room
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Signed-AddMember'
+
+      responses:
+        204:
+          description: Operation completed.
+
+        404:
+          description: |
+            Room does not exist or the user does not have permission for the
+            operation.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+
+        409:
+          description:
+            The user is already a room member.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+
+  /_blah/room/{rid}/member/{target_id_key}:
+    delete:
+      summary: Remove a room member.
+
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Signed-RemoveMember'
+
+      responses:
+        204:
+          description: Operation completed.
+
+        403:
+          description: |
+            The user does not have permission to remove the operand member.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+
+        404:
+          description: |
+            Room does not exist, the user does not have permission for the
+            operation, or the operand user is not a room member.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+
+
 # Ideally we should generate these from src, but we need to
 # WAIT: https://github.com/juhaku/utoipa/pull/1034
 components:
@@ -775,6 +840,11 @@ components:
                   const: 'auth'
 
     Signed-RoomAdmin:
+      oneOf:
+        - $ref: '#/components/schemas/Signed-AddMember'
+        - $ref: '#/components/schemas/Signed-RemoveMember'
+
+    Signed-AddMember:
       type: object
       properties:
         sig:
@@ -793,32 +863,47 @@ components:
             act_key:
               type: string
             payload:
-              oneOf:
+              type: object
+              properties:
+                typ:
+                  type: string
+                  const: 'add_member'
+                room:
+                  type: string
+                permission:
+                  type: integer
+                  format: int32
+                user:
+                  type: string
 
-                - description: Add member to the room.
-                  type: object
-                  properties:
-                    typ:
-                      type: string
-                      const: 'add_member'
-                    room:
-                      type: string
-                    permission:
-                      type: integer
-                      format: int32
-                    user:
-                      type: string
-
-                - description: Remove member from the room.
-                  type: object
-                  properties:
-                    typ:
-                      type: string
-                      const: 'remove_member'
-                    room:
-                      type: string
-                    user:
-                      type: string
+    Signed-RemoveMember:
+      type: object
+      properties:
+        sig:
+          type: string
+        signee:
+          type: object
+          properties:
+            nonce:
+              type: integer
+              format: uint32
+            timestamp:
+              type: integer
+              format: uint64
+            id_key:
+              type: string
+            act_key:
+              type: string
+            payload:
+              type: object
+              properties:
+                typ:
+                  type: string
+                  const: 'remove_member'
+                room:
+                  type: string
+                user:
+                  type: string
 
     Signed-Chat:
       type: object

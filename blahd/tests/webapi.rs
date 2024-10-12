@@ -10,10 +10,10 @@ use std::time::{Duration, Instant};
 use anyhow::{Context, Result};
 use blah_types::identity::{IdUrl, UserActKeyDesc, UserIdentityDesc, UserProfile};
 use blah_types::msg::{
-    AuthPayload, ChatPayload, CreateGroup, CreatePeerChat, CreateRoomPayload, DeleteRoomPayload,
-    MemberPermission, RichText, RoomAdminOp, RoomAdminPayload, RoomAttrs, ServerPermission,
-    SignedChatMsg, SignedChatMsgWithId, UserRegisterChallengeResponse, UserRegisterPayload,
-    WithMsgId,
+    self, AddMemberPayload, AuthPayload, ChatPayload, CreateGroup, CreatePeerChat,
+    CreateRoomPayload, DeleteRoomPayload, MemberPermission, RemoveMemberPayload, RichText,
+    RoomAttrs, ServerPermission, SignedChatMsg, SignedChatMsgWithId, UserRegisterChallengeResponse,
+    UserRegisterPayload, WithMsgId,
 };
 use blah_types::server::{
     RoomList, RoomMember, RoomMemberList, RoomMetadata, RoomMsgs, ServerEvent, ServerMetadata,
@@ -302,30 +302,39 @@ impl Server {
     ) -> impl Future<Output = Result<()>> + use<'_> {
         let req = self.sign(
             user,
-            RoomAdminPayload {
+            AddMemberPayload {
                 room: rid,
-                op: RoomAdminOp::AddMember {
+                member: msg::RoomMember {
                     permission,
                     user: user.pubkeys.id_key.clone(),
                 },
             },
         );
-        self.request::<_, NoContent>(Method::POST, &format!("/room/{rid}/admin"), None, Some(req))
-            .map_ok(|None| {})
+        self.request::<_, NoContent>(
+            Method::POST,
+            &format!("/room/{rid}/member"),
+            None,
+            Some(req),
+        )
+        .map_ok(|None| {})
     }
 
     fn leave_room(&self, rid: Id, user: &User) -> impl Future<Output = Result<()>> + use<'_> {
+        let user_id = user.pubkeys.id_key.clone();
         let req = self.sign(
             user,
-            RoomAdminPayload {
+            RemoveMemberPayload {
                 room: rid,
-                op: RoomAdminOp::RemoveMember {
-                    user: user.pubkeys.id_key.clone(),
-                },
+                user: user_id.clone(),
             },
         );
-        self.request::<_, NoContent>(Method::POST, &format!("/room/{rid}/admin"), None, Some(req))
-            .map_ok(|None| {})
+        self.request::<_, NoContent>(
+            Method::DELETE,
+            &format!("/room/{rid}/member/{user_id}"),
+            None,
+            Some(req),
+        )
+        .map_ok(|None| {})
     }
 
     fn post_chat(
@@ -585,7 +594,7 @@ async fn room_join_leave(server: Server) {
     server
         .join_room(rid_priv, &BOB, MemberPermission::ALL)
         .await
-        .expect_invalid_request("invalid initial permission");
+        .expect_invalid_request("invalid member permission");
 
     // Bob is joined now.
     assert_eq!(

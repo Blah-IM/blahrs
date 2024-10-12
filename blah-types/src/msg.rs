@@ -339,24 +339,36 @@ pub struct RoomMember {
 #[serde(tag = "typ", rename = "auth")]
 pub struct AuthPayload {}
 
+// FIXME: Remove this.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 // `typ` is provided by `RoomAdminOp`.
 pub struct RoomAdminPayload {
-    pub room: Id,
     #[serde(flatten)]
     pub op: RoomAdminOp,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "typ", rename_all = "snake_case", rename = "remove_member")]
+pub struct RemoveMemberPayload {
+    pub room: Id,
+    // TODO: This field name collide with `Signee::user`.
+    pub user: PubKey,
+}
+
+// TODO: Maybe disallow adding other user without consent?
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "typ", rename_all = "snake_case")]
+pub struct AddMemberPayload {
+    pub room: Id,
+    #[serde(flatten)]
+    pub member: RoomMember,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(untagged)]
 pub enum RoomAdminOp {
-    AddMember {
-        permission: MemberPermission,
-        user: PubKey,
-    },
-    RemoveMember {
-        user: PubKey,
-    },
+    AddMember(AddMemberPayload),
+    RemoveMember(RemoveMemberPayload),
     // TODO: RU
 }
 
@@ -479,6 +491,7 @@ mod sql_impl {
 mod tests {
     use ed25519_dalek::{SigningKey, PUBLIC_KEY_LENGTH};
     use expect_test::expect;
+    use AddMemberPayload;
 
     use crate::SignExt;
 
@@ -547,11 +560,13 @@ mod tests {
     #[test]
     fn room_admin_serde() {
         let data = RoomAdminPayload {
-            room: Id(42),
-            op: RoomAdminOp::AddMember {
-                permission: MemberPermission::POST_CHAT,
-                user: PubKey([0x42; PUBLIC_KEY_LENGTH]),
-            },
+            op: RoomAdminOp::AddMember(AddMemberPayload {
+                room: Id(42),
+                member: RoomMember {
+                    permission: MemberPermission::POST_CHAT,
+                    user: PubKey([0x42; PUBLIC_KEY_LENGTH]),
+                },
+            }),
         };
         let raw = serde_jcs::to_string(&data).unwrap();
 

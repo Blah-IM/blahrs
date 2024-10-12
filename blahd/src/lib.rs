@@ -1,3 +1,4 @@
+use std::marker::PhantomData;
 use std::num::NonZero;
 use std::sync::Arc;
 use std::time::Duration;
@@ -7,24 +8,24 @@ use axum::body::Bytes;
 use axum::extract::{Path, Query, State};
 use axum::http::{header, HeaderName, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, post};
 use axum::{Json, Router};
 use axum_extra::extract::WithRejection as R;
 use blah_types::msg::{
-    ChatPayload, CreateGroup, CreatePeerChat, CreateRoomPayload, DeleteRoomPayload,
-    MemberPermission, RoomAdminOp, RoomAdminPayload, RoomAttrs, ServerPermission,
-    SignedChatMsgWithId, WithMsgId,
+    AddMemberPayload, ChatPayload, CreateGroup, CreatePeerChat, CreateRoomPayload,
+    DeleteRoomPayload, MemberPermission, RemoveMemberPayload, RoomAdminOp, RoomAdminPayload,
+    RoomAttrs, ServerPermission, SignedChatMsgWithId, WithMsgId,
 };
 use blah_types::server::{
     ErrorResponseWithChallenge, RoomList, RoomMember, RoomMemberList, RoomMetadata, RoomMsgs,
     ServerCapabilities, ServerMetadata,
 };
-use blah_types::{get_timestamp, Id, Signed, UserKey};
+use blah_types::{get_timestamp, Id, PubKey, Signed, UserKey};
 use data_encoding::BASE64_NOPAD;
 use database::{Transaction, TransactionOps};
 use id::IdExt;
 use middleware::{Auth, ETag, MaybeAuth, ResultExt as _, SignedJson};
 use parking_lot::Mutex;
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_inline_default::serde_inline_default;
 use sha2::Digest;
@@ -148,7 +149,9 @@ impl AppState {
 type ArcState = State<Arc<AppState>>;
 
 pub fn router(st: Arc<AppState>) -> Router {
-    // NB. User consistent handler naming: `<method>_<path>[_<details>]`.
+    use axum::routing::{delete, get, post};
+
+    // NB. Use consistent handler naming: `<method>_<path>[_<details>]`.
     // Use prefix `list` for GET with pagination.
     //
     // One route per line.
@@ -165,8 +168,11 @@ pub fn router(st: Arc<AppState>) -> Router {
         .route("/room/:rid/feed.atom", get(feed::get_room_feed::<feed::AtomFeed>))
         .route("/room/:rid/msg", get(list_room_msg).post(post_room_msg))
         .route("/room/:rid/msg/:cid/seen", post(post_room_msg_seen))
+        // TODO!: remove this.
         .route("/room/:rid/admin", post(post_room_admin))
-        .route("/room/:rid/member", get(list_room_member));
+        .route("/room/:rid/member", get(list_room_member).post(post_room_member))
+        .route("/room/:rid/member/:uid", delete(delete_room_member))
+        ;
 
     let router = router
         .layer(tower_http::limit::RequestBodyLimitLayer::new(
@@ -470,58 +476,81 @@ async fn post_room_admin(
     R(Path(rid), _): RE<Path<Id>>,
     SignedJson(op): SignedJson<RoomAdminPayload>,
 ) -> Result<StatusCode, ApiError> {
-    api_ensure!(rid == op.signee.payload.room, "room id mismatch with URI");
-    api_ensure!(!rid.is_peer_chat(), "cannot operate on a peer chat room");
-
-    match op.signee.payload.op {
-        RoomAdminOp::AddMember { user, permission } => {
-            api_ensure!(
-                user == op.signee.user.id_key,
-                ApiError::NotImplemented("only self-adding is implemented yet"),
-            );
-            api_ensure!(
-                MemberPermission::MAX_SELF_ADD.contains(permission),
-                "invalid initial permission",
-            );
-            room_join(&st, rid, &op.signee.user, permission).await?;
-        }
-        RoomAdminOp::RemoveMember { user } => {
-            api_ensure!(
-                user == op.signee.user.id_key,
-                ApiError::NotImplemented("only self-removal is implemented yet"),
-            );
-            room_leave(&st, rid, &op.signee.user).await?;
-        }
+    // TODO: This is a temporary endpoint so just reserialize them.
+    fn transcode<T: Serialize, U: DeserializeOwned>(v: &T) -> SignedJson<U> {
+        let v = serde_json::to_value(v).expect("serialization cannot fail");
+        SignedJson(serde_json::from_value(v).expect("format should be compatible"))
     }
 
-    Ok(StatusCode::NO_CONTENT)
+    match op.signee.payload.op {
+        RoomAdminOp::AddMember(_) => {
+            post_room_member(st, R(Path(rid), PhantomData), transcode(&op)).await
+        }
+        RoomAdminOp::RemoveMember(_) => {
+            delete_room_member(
+                st,
+                R(Path((rid, op.signee.user.id_key.clone())), PhantomData),
+                transcode(&op),
+            )
+            .await
+        }
+    }
 }
 
-async fn room_join(
-    st: &AppState,
-    rid: Id,
-    user: &UserKey,
-    permission: MemberPermission,
-) -> Result<(), ApiError> {
+async fn post_room_member(
+    st: ArcState,
+    R(Path(rid), _): RE<Path<Id>>,
+    SignedJson(op): SignedJson<AddMemberPayload>,
+) -> Result<StatusCode, ApiError> {
+    api_ensure!(rid == op.signee.payload.room, "room id mismatch with URI");
+    api_ensure!(
+        !rid.is_peer_chat(),
+        "cannot add members to a peer chat room"
+    );
+    let member = op.signee.payload.member;
+    api_ensure!(
+        member.user == op.signee.user.id_key,
+        ApiError::NotImplemented("only self-adding is implemented yet"),
+    );
+    api_ensure!(
+        MemberPermission::MAX_SELF_ADD.contains(member.permission),
+        "invalid member permission",
+    );
+
     st.db.with_write(|txn| {
-        let (uid, _perm) = txn.get_user(user)?;
+        let (uid, _perm) = txn.get_user(&op.signee.user)?;
         let (attrs, _) = txn.get_room_having(rid, RoomAttrs::PUBLIC_JOINABLE)?;
         // Sanity check.
         assert!(!attrs.contains(RoomAttrs::PEER_CHAT));
-        txn.add_room_member(rid, uid, permission)?;
-        Ok(())
+        txn.add_room_member(rid, uid, member.permission)?;
+        Ok(StatusCode::NO_CONTENT)
     })
 }
 
-async fn room_leave(st: &AppState, rid: Id, user: &UserKey) -> Result<(), ApiError> {
+async fn delete_room_member(
+    st: ArcState,
+    R(Path((rid, id_key)), _): RE<Path<(Id, PubKey)>>,
+    SignedJson(op): SignedJson<RemoveMemberPayload>,
+) -> Result<StatusCode, ApiError> {
+    api_ensure!(rid == op.signee.payload.room, "room id mismatch with URI");
+    api_ensure!(
+        !rid.is_peer_chat(),
+        "cannot remove members from a peer chat room"
+    );
+    let tgt_user = op.signee.payload.user;
+    api_ensure!(id_key == tgt_user, "user id mismatch with URI");
+    api_ensure!(
+        op.signee.user.id_key == tgt_user,
+        ApiError::NotImplemented("only self-removal is implemented yet"),
+    );
+
     st.db.with_write(|txn| {
-        api_ensure!(!rid.is_peer_chat(), "cannot leave a peer chat room");
-        let (uid, ..) = txn.get_room_member(rid, user)?;
+        let (uid, ..) = txn.get_room_member(rid, &op.signee.user)?;
         let (attrs, _) = txn.get_room_having(rid, RoomAttrs::empty())?;
         // Sanity check.
         assert!(!attrs.contains(RoomAttrs::PEER_CHAT));
         txn.remove_room_member(rid, uid)?;
-        Ok(())
+        Ok(StatusCode::NO_CONTENT)
     })
 }
 
