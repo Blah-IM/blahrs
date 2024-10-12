@@ -23,7 +23,7 @@ use blah_types::{get_timestamp, Id, PubKey, Signed, UserKey};
 use data_encoding::BASE64_NOPAD;
 use database::{Transaction, TransactionOps};
 use id::IdExt;
-use middleware::{Auth, ETag, MaybeAuth, ResultExt as _, SignedJson};
+use middleware::{Auth, ETag, MaybeAuth, NoContent, ResultExt as _, SignedJson};
 use parking_lot::Mutex;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Deserializer, Serialize};
@@ -218,7 +218,7 @@ async fn get_user(State(st): ArcState, auth: MaybeAuth) -> Response {
     })();
 
     match ret {
-        Ok(_) => StatusCode::NO_CONTENT.into_response(),
+        Ok(_) => NoContent.into_response(),
         Err(err) => {
             let (status, raw_err) = err.to_raw();
             if status != StatusCode::NOT_FOUND {
@@ -475,7 +475,7 @@ async fn post_room_admin(
     st: ArcState,
     R(Path(rid), _): RE<Path<Id>>,
     SignedJson(op): SignedJson<RoomAdminPayload>,
-) -> Result<StatusCode, ApiError> {
+) -> Result<NoContent, ApiError> {
     // TODO: This is a temporary endpoint so just reserialize them.
     fn transcode<T: Serialize, U: DeserializeOwned>(v: &T) -> SignedJson<U> {
         let v = serde_json::to_value(v).expect("serialization cannot fail");
@@ -501,7 +501,7 @@ async fn post_room_member(
     st: ArcState,
     R(Path(rid), _): RE<Path<Id>>,
     SignedJson(op): SignedJson<AddMemberPayload>,
-) -> Result<StatusCode, ApiError> {
+) -> Result<NoContent, ApiError> {
     api_ensure!(rid == op.signee.payload.room, "room id mismatch with URI");
     api_ensure!(
         !rid.is_peer_chat(),
@@ -523,7 +523,7 @@ async fn post_room_member(
         // Sanity check.
         assert!(!attrs.contains(RoomAttrs::PEER_CHAT));
         txn.add_room_member(rid, uid, member.permission)?;
-        Ok(StatusCode::NO_CONTENT)
+        Ok(NoContent)
     })
 }
 
@@ -531,7 +531,7 @@ async fn delete_room_member(
     st: ArcState,
     R(Path((rid, id_key)), _): RE<Path<(Id, PubKey)>>,
     SignedJson(op): SignedJson<RemoveMemberPayload>,
-) -> Result<StatusCode, ApiError> {
+) -> Result<NoContent, ApiError> {
     api_ensure!(rid == op.signee.payload.room, "room id mismatch with URI");
     api_ensure!(
         !rid.is_peer_chat(),
@@ -550,7 +550,7 @@ async fn delete_room_member(
         // Sanity check.
         assert!(!attrs.contains(RoomAttrs::PEER_CHAT));
         txn.remove_room_member(rid, uid)?;
-        Ok(StatusCode::NO_CONTENT)
+        Ok(NoContent)
     })
 }
 
@@ -558,7 +558,7 @@ async fn delete_room(
     st: ArcState,
     R(Path(rid), _): RE<Path<Id>>,
     SignedJson(op): SignedJson<DeleteRoomPayload>,
-) -> Result<StatusCode, ApiError> {
+) -> Result<NoContent, ApiError> {
     api_ensure!(rid == op.signee.payload.room, "room id mismatch with URI");
     st.db.with_write(|txn| {
         // TODO: Should we only shadow delete here?
@@ -568,7 +568,7 @@ async fn delete_room(
             ApiError::PermissionDenied("the user does not have permission to delete the room")
         );
         txn.delete_room(rid)?;
-        Ok(StatusCode::NO_CONTENT)
+        Ok(NoContent)
     })
 }
 
@@ -576,7 +576,7 @@ async fn post_room_msg_seen(
     st: ArcState,
     R(Path((rid, cid)), _): RE<Path<(Id, i64)>>,
     Auth(user): Auth,
-) -> Result<StatusCode, ApiError> {
+) -> Result<NoContent, ApiError> {
     st.db.with_write(|txn| {
         let (uid, _perm, prev_seen_cid) = txn.get_room_member(rid, &user)?;
         if cid < prev_seen_cid.0 {
@@ -584,7 +584,7 @@ async fn post_room_msg_seen(
         }
         txn.mark_room_msg_seen(rid, uid, Id(cid as _))
     })?;
-    Ok(StatusCode::NO_CONTENT)
+    Ok(NoContent)
 }
 
 async fn list_room_member(

@@ -2,7 +2,6 @@ use std::num::NonZero;
 use std::time::Duration;
 
 use anyhow::{anyhow, ensure};
-use axum::http::StatusCode;
 use blah_types::get_timestamp;
 use blah_types::identity::{IdUrl, UserIdentityDesc};
 use blah_types::msg::{UserRegisterChallengeResponse, UserRegisterPayload};
@@ -15,7 +14,7 @@ use serde::Deserialize;
 use sha2::{Digest, Sha256};
 
 use crate::database::TransactionOps;
-use crate::middleware::SignedJson;
+use crate::middleware::{NoContent, SignedJson};
 use crate::utils::Instant;
 use crate::{ApiError, ArcState, SERVER_AND_VERSION};
 
@@ -163,7 +162,7 @@ impl State {
 pub async fn post_user(
     axum::extract::State(st): ArcState,
     SignedJson(msg): SignedJson<UserRegisterPayload>,
-) -> Result<StatusCode, ApiError> {
+) -> Result<NoContent, ApiError> {
     if !st.config.register.enable_public {
         return Err(ApiError::Disabled("public registration is disabled"));
     }
@@ -252,7 +251,7 @@ pub async fn post_user(
     st.db
         .with_write(|txn| txn.create_user(&id_desc, &id_desc_json, fetch_time))?;
 
-    Ok(StatusCode::NO_CONTENT)
+    Ok(NoContent)
 }
 
 #[cfg(test)]

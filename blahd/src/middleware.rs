@@ -280,3 +280,13 @@ impl<T: fmt::Display> IntoResponseParts for ETag<T> {
         Ok(res)
     }
 }
+
+// WAIT: https://github.com/tokio-rs/axum/pull/2978
+#[derive(Debug, Clone, Copy)]
+pub struct NoContent;
+
+impl IntoResponse for NoContent {
+    fn into_response(self) -> Response {
+        StatusCode::NO_CONTENT.into_response()
+    }
+}
