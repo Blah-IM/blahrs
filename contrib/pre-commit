@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+set -euo pipefail
+typos
+cargo fmt -- --check
+fd -e nix | xargs nixfmt --check

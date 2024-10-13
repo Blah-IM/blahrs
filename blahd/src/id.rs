@@ -38,7 +38,7 @@ impl IdExt for Id {
                 last_id.set(id);
                 Id(id)
             } else {
-                // Otherwise, try to increse the trailing counter.
+                // Otherwise, try to increase the trailing counter.
                 assert!(prev < (1 << 16), "id counter overflow");
                 last_id.set(prev + 1);
                 Id(prev + 1)

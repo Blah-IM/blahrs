@@ -37,6 +37,9 @@ jobs:
       - name: Rustdoc
         run: cargo doc --workspace --no-deps
 
+      - name: Typos
+        uses: crate-ci/typos@v1.26.0
+
   test:
     strategy:
       fail-fast: false
