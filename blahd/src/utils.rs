@@ -8,6 +8,11 @@ pub use std::time::{Instant, SystemTime};
 #[cfg(feature = "unsafe_use_mock_instant_for_testing")]
 pub use mock_instant::thread_local::{Instant, SystemTime};
 
+#[cfg(all(feature = "unsafe_use_mock_instant_for_testing", not(debug_assertions)))]
+compile_error!(
+    "`unsafe_use_mock_instant_for_testing` feature must not be enabled in release build",
+);
+
 #[derive(Debug)]
 pub struct ExpiringSet<T> {
     set: HashSet<T>,
