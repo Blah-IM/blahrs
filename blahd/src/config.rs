@@ -1,5 +1,8 @@
-use serde::{Deserialize, Serialize};
+use std::num::NonZero;
+
+use serde::Deserialize;
 use serde_constant::ConstBool;
+use serde_inline_default::serde_inline_default;
 
 use crate::{database, ServerConfig};
 
@@ -10,13 +13,32 @@ pub struct Config {
     pub database: database::Config,
     pub listen: ListenConfig,
     pub server: ServerConfig,
+    #[serde(default)]
+    pub metric: Option<MetricConfig>,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ListenConfig {
     Address(String),
     Systemd(ConstBool<true>),
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MetricConfig {
+    Prometheus(#[serde(default)] PrometheusConfig),
+}
+
+#[serde_inline_default]
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PrometheusConfig {
+    pub listen: ListenConfig,
+    #[serde_inline_default(5.try_into().expect("not zero"))]
+    pub upkeep_period_secs: NonZero<u32>,
+    #[serde_inline_default(20.try_into().expect("not zero"))]
+    pub bucket_duration_secs: NonZero<u32>,
 }
 
 #[cfg(test)]

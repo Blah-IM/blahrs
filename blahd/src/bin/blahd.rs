@@ -3,9 +3,10 @@ use std::os::fd::{FromRawFd, OwnedFd};
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{bail, Context, Result};
 use blahd::config::{Config, ListenConfig};
 use blahd::{AppState, Database};
+use tokio::net::TcpListener;
 use tokio::signal::unix::{signal, SignalKind};
 
 /// Blah Chat Server
@@ -57,47 +58,72 @@ fn main() -> Result<()> {
 async fn main_serve(db: Database, config: Config) -> Result<()> {
     let st = AppState::new(db, config.server);
 
-    let (listener_display, listener) = match &config.listen {
-        ListenConfig::Address(addr) => (
-            format!("address {addr:?}"),
-            tokio::net::TcpListener::bind(addr)
-                .await
-                .context("failed to listen on socket")?,
-        ),
-        ListenConfig::Systemd(_) => {
-            use rustix::net::{getsockname, SocketAddrAny};
+    let mut listen_fds = sd_notify::listen_fds()
+        .context("failed to get fds from sd_listen_fds(3)")?
+        // SAFETY: `fd` is valid by sd_listen_fds(3) protocol.
+        .map(|fd| unsafe { Some(OwnedFd::from_raw_fd(fd)) })
+        .collect::<Vec<_>>();
 
-            let [fd] = sd_notify::listen_fds()
-                .context("failed to get fds from sd_listen_fds(3)")?
-                .collect::<Vec<_>>()
-                .try_into()
-                .map_err(|_| anyhow!("expecting exactly one fd from LISTEN_FDS"))?;
-            // SAFETY: `fd` is valid by sd_listen_fds(3) protocol.
-            let listener = unsafe { OwnedFd::from_raw_fd(fd) };
-
-            let addr = getsockname(&listener).context("failed to getsockname")?;
-            match addr {
-                SocketAddrAny::V4(_) | SocketAddrAny::V6(_) => {
-                    let listener = std::net::TcpListener::from(listener);
-                    listener
-                        .set_nonblocking(true)
-                        .context("failed to set socket non-blocking")?;
-                    let listener = tokio::net::TcpListener::from_std(listener)
-                        .context("failed to register async socket")?;
-                    (format!("tcp socket {addr:?} from LISTEN_FDS"), listener)
+    let mut get_listener = move |name: &'static str, fd_idx: usize, listen: ListenConfig| {
+        let fd = listen_fds.get_mut(0).and_then(|opt| opt.take());
+        async move {
+            match listen {
+                ListenConfig::Address(addr) => {
+                    tracing::info!("serve {name} on address {addr:?}");
+                    TcpListener::bind(addr)
+                        .await
+                        .context("failed to listen on socket")
                 }
-                // Unix socket support for axum is currently overly complex.
-                // WAIT: https://github.com/tokio-rs/axum/pull/2479
-                _ => bail!("unsupported socket type from LISTEN_FDS: {addr:?}"),
+                ListenConfig::Systemd(_) => {
+                    use rustix::net::{getsockname, SocketAddrAny};
+
+                    let fd = fd.with_context(|| format!("missing LISTEN_FDS[{fd_idx}]"))?;
+                    let addr = getsockname(&fd).context("failed to getsockname")?;
+                    match addr {
+                        SocketAddrAny::V4(_) | SocketAddrAny::V6(_) => {
+                            let listener = std::net::TcpListener::from(fd);
+                            listener
+                                .set_nonblocking(true)
+                                .context("failed to set socket non-blocking")?;
+                            let listener = TcpListener::from_std(listener)
+                                .context("failed to register async socket")?;
+                            tracing::info!(
+                                "serve {name} on tcp socket {addr:?} from LISTEN_FDS[{fd_idx}"
+                            );
+                            Ok(listener)
+                        }
+                        // Unix socket support for axum is currently overly complex.
+                        // WAIT: https://github.com/tokio-rs/axum/pull/2479
+                        _ => bail!("unsupported socket type from LISTEN_FDS[{fd_idx}]: {addr:?}"),
+                    }
+                }
             }
         }
     };
 
-    tracing::info!("listening on {listener_display}");
-
     let router = blahd::router(Arc::new(st));
 
+    #[cfg(not(feature = "prometheus"))]
+    anyhow::ensure!(
+        config.metric.is_none(),
+        "metric support is disabled at compile time",
+    );
+
+    #[cfg(feature = "prometheus")]
+    let router = if let Some(metric_config) = &config.metric {
+        let blahd::config::MetricConfig::Prometheus(prom_config) = metric_config;
+        let metric_listener = get_listener("metrics", 1, prom_config.listen.clone()).await?;
+        let (metric_router, recorder, upkeeper) = blahd::metrics_router(metric_config);
+        metrics::set_global_recorder(recorder).expect("only set once");
+        tokio::spawn(upkeeper);
+        tokio::spawn(axum::serve(metric_listener, metric_router).into_future());
+        router.layer(axum_metrics::MetricLayer::default())
+    } else {
+        router
+    };
+
     let mut sigterm = signal(SignalKind::terminate()).context("failed to listen on SIGTERM")?;
+    let listener = get_listener("main", 0, config.listen.clone()).await?;
     let service = axum::serve(listener, router)
         .with_graceful_shutdown(async move {
             sigterm.recv().await;

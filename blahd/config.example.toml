@@ -94,3 +94,18 @@ difficulty = 16
 
 # The challenge nonce rotation period in seconds.
 nonce_rotate_secs = 60
+
+# If this section appears, the prometheus metrics tracking is enabled.
+# The server must be built with "prometheus" feature enabled to support this.
+#[metric.prometheus]
+
+# The listen address for the metrics server, in the same type as `[listen]`.
+# GET on route `/metrics` responds in Prometheus Exposition Format.
+# See more: https://prometheus.io/docs/instrumenting/exposition_formats/#text-based-format
+#listen.systemd = true
+
+# Upkeep interval in seconds.
+#upkeep_period_secs = 5
+
+# The bucket width in seconds for histograms.
+#bucket_duration_secs = 20

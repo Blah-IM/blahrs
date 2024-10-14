@@ -63,6 +63,7 @@ rec {
                 ++ [
                   "--package=blahd"
                   "--package=blahctl"
+                  "--features=prometheus"
                 ];
 
               # Intentionally omit the socket unit. It is trivial but

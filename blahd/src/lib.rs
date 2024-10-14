@@ -44,6 +44,11 @@ mod id;
 mod register;
 mod utils;
 
+#[cfg(feature = "prometheus")]
+mod metric;
+#[cfg(feature = "prometheus")]
+pub use metric::metrics_router;
+
 pub use database::{Config as DatabaseConfig, Database};
 pub use middleware::ApiError;
 

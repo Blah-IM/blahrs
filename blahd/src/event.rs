@@ -138,6 +138,20 @@ impl Stream for UserEventReceiver {
 // TODO: Authenticate via HTTP query?
 pub async fn get_ws(st: ArcState, ws: WebSocketUpgrade) -> Response {
     ws.on_upgrade(move |mut socket| async move {
+        #[cfg(feature = "prometheus")]
+        let _guard = {
+            struct DecOnDrop(metrics::Gauge);
+            impl Drop for DecOnDrop {
+                fn drop(&mut self) {
+                    self.0.decrement(1);
+                }
+            }
+
+            let gauge = metrics::gauge!("ws_connections_in_flight");
+            gauge.increment(1);
+            DecOnDrop(gauge)
+        };
+
         match handle_ws(st.0, &mut socket).await {
             #[allow(
                 unreachable_patterns,
