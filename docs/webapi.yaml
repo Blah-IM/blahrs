@@ -12,19 +12,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  server:
-                    type: string
-                    example: 'blah/0.0.0'
-                  src_url:
-                    type: string
-                    example: 'https://github.com/Blah-IM/blahrs'
-                  capabilities:
-                    type: object
-                    properties:
-                      allow_public_register:
-                        type: boolean
+                $ref: 'types.json#/components/schemas/ServerMetadata'
 
   # OAPI does not support WebSocket interface definitions.
   # See: https://github.com/OAI/OpenAPI-Specification/issues/55#issuecomment-929382279
@@ -35,7 +23,7 @@ paths:
         This endpoint is for server-side-event dispatching.
 
         Once connected, client must send a JSON text message of type
-        `Signed-Auth` for authentication.
+        `Signed_Auth` for authentication.
         If server does not close it immediately, it means success.
 
         Since OAPI does not support WebSocket interface, we use request and
@@ -54,7 +42,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/WSClientToServer'
+              $ref: 'types.json#/components/schemas/ClientEvent'
 
       responses:
         101:
@@ -66,7 +54,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/WSServerToClient'
+                $ref: 'types.json#/components/schemas/ServerEvent'
 
   /_blah/user/me:
     get:
@@ -76,7 +64,7 @@ paths:
           in: header
           description: Optional user authentication token.
           schema:
-            $ref: '#/components/schemas/Signed-Auth'
+            $ref: 'types.json#/components/schemas/Signed_AuthPayload'
 
       responses:
         204:
@@ -88,7 +76,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ApiErrorWithRegisterChallenge'
+                $ref: 'types.json#/components/schemas/ErrorResponseWithChallenge'
 
     post:
       summary: Register or update user identity
@@ -116,7 +104,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/Signed-UserRegister'
+              $ref: 'types.json#/components/schemas/Signed_UserRegisterPayload'
 
       responses:
         204:
@@ -127,7 +115,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ApiError'
+                $ref: 'types.json#/components/schemas/ErrorResponse'
 
         401:
           description: |
@@ -136,7 +124,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ApiError'
+                $ref: 'types.json#/components/schemas/ErrorResponse'
 
         403:
           description: |
@@ -145,7 +133,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ApiError'
+                $ref: 'types.json#/components/schemas/ErrorResponse'
 
         409:
           description: |
@@ -153,7 +141,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ApiError'
+                $ref: 'types.json#/components/schemas/ErrorResponse'
 
         422:
           description: |
@@ -163,7 +151,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ApiError'
+                $ref: 'types.json#/components/schemas/ErrorResponse'
 
   /_blah/room:
     get:
@@ -207,7 +195,7 @@ paths:
           in: header
           description: Optional proof of membership for private rooms.
           schema:
-            $ref: '#/components/schemas/Signed-Auth'
+            $ref: 'types.json#/components/schemas/Signed_AuthPayload'
 
       responses:
         200:
@@ -215,14 +203,14 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/RoomList'
+                $ref: 'types.json#/components/schemas/RoomList'
 
         401:
           description: Missing or invalid Authorization header.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ApiError'
+                $ref: 'types.json#/components/schemas/ErrorResponse'
 
     post:
       summary: Create a room
@@ -237,7 +225,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/Signed-CreateRoom'
+              $ref: 'types.json#/components/schemas/Signed_CreateRoomPayload'
 
       responses:
         200:
@@ -253,7 +241,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ApiError'
+                $ref: 'types.json#/components/schemas/ErrorResponse'
 
         404:
           description: |
@@ -262,14 +250,14 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ApiError'
+                $ref: 'types.json#/components/schemas/ErrorResponse'
 
         409:
           description: There is already a peer chat room between the user pair.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ApiError'
+                $ref: 'types.json#/components/schemas/ErrorResponse'
 
   /_blah/room/create:
     post:
@@ -286,7 +274,7 @@ paths:
           in: header
           description: Optional proof of membership for private rooms.
           schema:
-            $ref: '#/components/schemas/Signed-Auth'
+            $ref: 'types.json#/components/schemas/Signed_AuthPayload'
 
       responses:
         200:
@@ -294,7 +282,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/RoomMetadata'
+                $ref: 'types.json#/components/schemas/RoomMetadata'
 
         404:
           description: |
@@ -302,7 +290,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ApiError'
+                $ref: 'types.json#/components/schemas/ErrorResponse'
 
     delete:
       summary: Delete a room
@@ -310,7 +298,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/Signed-DeleteRoom'
+              $ref: 'types.json#/components/schemas/Signed_DeleteRoomPayload'
 
       responses:
         204:
@@ -321,7 +309,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ApiError'
+                $ref: 'types.json#/components/schemas/ErrorResponse'
 
         404:
           description: |
@@ -329,7 +317,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ApiError'
+                $ref: 'types.json#/components/schemas/ErrorResponse'
 
   /_blah/room/{rid}/admin:
     post:
@@ -343,7 +331,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/Signed-RoomAdmin'
+              $ref: 'types.json#/components/schemas/Signed_RoomAdminPayload'
 
       responses:
         204:
@@ -356,7 +344,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ApiError'
+                $ref: 'types.json#/components/schemas/ErrorResponse'
 
         409:
           description:
@@ -364,7 +352,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ApiError'
+                $ref: 'types.json#/components/schemas/ErrorResponse'
 
   /_blah/room/{rid}/feed.json:
     get:
@@ -385,7 +373,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ApiError'
+                $ref: 'types.json#/components/schemas/ErrorResponse'
 
   /_blah/room/{rid}/feed.atom:
     get:
@@ -408,8 +396,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ApiError'
-
+                $ref: 'types.json#/components/schemas/ErrorResponse'
 
   /_blah/room/{rid}/msg:
     get:
@@ -426,7 +413,7 @@ paths:
           in: header
           description: Optional proof of membership for private rooms.
           schema:
-            $ref: '#/components/schemas/Signed-Auth'
+            $ref: 'types.json#/components/schemas/Signed_AuthPayload'
 
         - name: top
           in: query
@@ -450,7 +437,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/RoomMsgs'
+                $ref: 'types.json#/components/schemas/RoomMsgs'
 
         404:
           description: |
@@ -458,7 +445,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ApiError'
+                $ref: 'types.json#/components/schemas/ErrorResponse'
 
     post:
       summary: Post a `Msg` into a room
@@ -466,14 +453,14 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/Signed-Chat'
+              $ref: 'types.json#/components/schemas/Signed_ChatPayload'
 
       responses:
         200:
           content:
             application/json:
               schema:
-                type: string
+                $ref: 'types.json#/components/schemas/Id'
                 description: Newly created message id `cid`.
 
         403:
@@ -481,14 +468,14 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ApiError'
+                $ref: 'types.json#/components/schemas/ErrorResponse'
 
         404:
           description: The room does not exist or the user is not a room member.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ApiError'
+                $ref: 'types.json#/components/schemas/ErrorResponse'
 
   /_blah/room/{rid}/msg/{cid}/seen:
     post:
@@ -507,7 +494,7 @@ paths:
           required: true
           description: Proof of membership for private rooms.
           schema:
-            $ref: '#/components/schemas/Signed-Auth'
+            $ref: 'types.json#/components/schemas/Signed_AuthPayload'
 
       responses:
         204:
@@ -519,7 +506,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ApiError'
+                $ref: 'types.json#/components/schemas/ErrorResponse'
 
   /_blah/room/{rid}/member:
     get:
@@ -530,7 +517,7 @@ paths:
           required: true
           description: Proof of membership.
           schema:
-            $ref: '#/components/schemas/Signed-Auth'
+            $ref: 'types.json#/components/schemas/Signed_AuthPayload'
 
         - name: top
           in: query
@@ -553,7 +540,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/RoomMemberList'
+                $ref: 'types.json#/components/schemas/RoomMemberList'
 
         403:
           description: |
@@ -561,7 +548,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ApiError'
+                $ref: 'types.json#/components/schemas/ErrorResponse'
 
         404:
           description: |
@@ -569,7 +556,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ApiError'
+                $ref: 'types.json#/components/schemas/ErrorResponse'
 
     post:
       summary: Join a room
@@ -577,7 +564,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/Signed-AddMember'
+              $ref: 'types.json#/components/schemas/Signed_AddMemberPayload'
 
       responses:
         204:
@@ -590,7 +577,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ApiError'
+                $ref: 'types.json#/components/schemas/ErrorResponse'
 
         409:
           description:
@@ -598,7 +585,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ApiError'
+                $ref: 'types.json#/components/schemas/ErrorResponse'
 
   /_blah/room/{rid}/member/{member_id_key}:
     get:
@@ -616,7 +603,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/RoomMember'
+                $ref: 'types.json#/components/schemas/ErrorResponse'
 
         404:
           description: |
@@ -625,7 +612,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ApiError'
+                $ref: 'types.json#/components/schemas/ErrorResponse'
 
     patch:
       summary: Update permission of a room member
@@ -634,7 +621,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/Signed-UpdateMember'
+              $ref: 'types.json#/components/schemas/Signed_UpdateMember'
 
       responses:
         204:
@@ -647,7 +634,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ApiError'
+                $ref: 'types.json#/components/schemas/ServerMetadata'
 
         404:
           description: |
@@ -656,7 +643,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ApiError'
+                $ref: 'types.json#/components/schemas/ServerMetadata'
 
     delete:
       summary: Remove a room member.
@@ -665,7 +652,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/Signed-RemoveMember'
+              $ref: 'types.json#/components/schemas/Signed_RemoveMember'
 
       responses:
         204:
@@ -677,7 +664,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ApiError'
+                $ref: 'types.json#/components/schemas/ServerMetadata'
 
         404:
           description: |
@@ -686,540 +673,4 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ApiError'
-
-
-# Ideally we should generate these from src, but we need to
-# WAIT: https://github.com/juhaku/utoipa/pull/1034
-components:
-  schemas:
-    WSClientToServer:
-      anyOf:
-        - $ref: '#/components/schemas/Signed-Auth'
-
-    WSServerToClient:
-      anyOf:
-        - type: object
-          properties:
-            chat:
-              $ref: '#/components/schemas/WithMsgId-Signed-Chat'
-
-        - type: object
-          properties:
-            lagged:
-              type: object
-              const: {}
-
-    ApiError:
-      type: object
-      properties:
-        error:
-          type: object
-          properties:
-            code:
-              type: string
-              description: A machine-readable error code string.
-              example: invalid_signature
-            message:
-              type: string
-              description: A human-readable error message.
-              example: signature verification failed
-
-    ApiErrorWithRegisterChallenge:
-      allOf:
-        - $ref: '#/components/schemas/ApiError'
-        - type: object
-          properties:
-            register_challenge:
-              type: object
-              properties:
-                pow:
-                  type: object
-                  properties:
-                    nonce:
-                      type: integer
-                      format: uint32
-                    difficulty:
-                      type: integer
-                      format: uint32
-
-    RoomList:
-      type: object
-      required:
-        - rooms
-      properties:
-        rooms:
-          type: array
-          items:
-            $ref: '#/components/schemas/RoomMetadataForList'
-        next_token:
-          type: string
-          description: An opaque token to fetch the next page.
-
-    RoomMetadataForList:
-      type: object
-      required: ['rid', 'title', 'attrs']
-      properties:
-        rid:
-          type: string
-        title:
-          type: string
-        attrs:
-          description: Room attributes bitset, see `RoomAttrs`.
-          type: integer
-          format: int32
-        last_msg:
-          $ref: '#/components/schemas/WithMsgId-Signed-Chat'
-        last_seen_cid:
-          description: The `cid` of the last chat being marked as seen.
-          type: string
-        unseen_cnt:
-          description: |
-            The number of unseen messages. Only available for
-            GET `/room?filter=unseen`.
-          type: integer
-          format: uint32
-        member_permission:
-          type: integer
-          format: int32
-        peer_user:
-          type: string
-          description: |
-            For peer chat room, this gives the identity of the peer user.
-
-    RoomMetadata:
-      type: object
-      required: ['rid', 'title', 'attrs']
-      properties:
-        rid:
-          type: string
-        title:
-          type: string
-        attrs:
-          type: integer
-          format: int32
-
-    RoomMsgs:
-      type: object
-      required:
-        - msgs
-      properties:
-        msgs:
-          description: Room messages in reversed server-received time order.
-          type: array
-          items:
-            $ref: '#/components/schemas/WithMsgId-Signed-Chat'
-        skip_token:
-          description: The token for fetching the next page.
-          type: string
-
-    RoomMemberList:
-      type: object
-      required:
-        - members
-      properties:
-        members:
-          description: Room members in server-specified order.
-          type: array
-          items:
-            $ref: '#/components/schemas/RoomMember'
-        skip_token:
-          description: The token for fetching the next page.
-          type: string
-
-    RoomMember:
-      type: object
-      required:
-        - id_key
-        - permission
-      properties:
-        id_key:
-          type: string
-        permission:
-          type: integer
-          format: int32
-        last_seen_cid:
-          type: string
-
-    RichText:
-      type: array
-      items:
-        anyOf:
-          - type: string
-            description: Unstyled text piece.
-          - type: array
-            items: false
-            prefixItems:
-              - type: string
-                description: The text piece to apply styles on.
-              - type: object
-                properties:
-                  b:
-                    type: boolean
-                    description: Bold.
-                  m:
-                    type: boolean
-                    description: Monospace.
-                  i:
-                    type: boolean
-                    description: Italic.
-                  s:
-                    type: boolean
-                    description: Strikethrough.
-                  u:
-                    type: boolean
-                    description: Underline.
-                  hashtag:
-                    type: boolean
-                    description: Hashtag.
-                  link:
-                    type: string
-                    description: Link target.
-
-
-    Signed-Auth:
-      type: object
-      properties:
-        sig:
-          type: string
-        signee:
-          type: object
-          properties:
-            nonce:
-              type: integer
-              format: uint32
-            timestamp:
-              type: integer
-              format: uint64
-            id_key:
-              type: string
-            act_key:
-              type: string
-            payload:
-              type: object
-              properties:
-                typ:
-                  type: string
-                  const: 'auth'
-
-    Signed-RoomAdmin:
-      oneOf:
-        - $ref: '#/components/schemas/Signed-AddMember'
-        - $ref: '#/components/schemas/Signed-RemoveMember'
-
-    Signed-AddMember:
-      type: object
-      properties:
-        sig:
-          type: string
-        signee:
-          type: object
-          properties:
-            nonce:
-              type: integer
-              format: uint32
-            timestamp:
-              type: integer
-              format: uint64
-            id_key:
-              type: string
-            act_key:
-              type: string
-            payload:
-              type: object
-              properties:
-                typ:
-                  type: string
-                  const: 'add_member'
-                room:
-                  type: string
-                permission:
-                  type: integer
-                  format: int32
-                user:
-                  type: string
-
-    Signed-UpdateMember:
-      type: object
-      properties:
-        sig:
-          type: string
-        signee:
-          type: object
-          properties:
-            nonce:
-              type: integer
-              format: uint32
-            timestamp:
-              type: integer
-              format: uint64
-            id_key:
-              type: string
-            act_key:
-              type: string
-            payload:
-              type: object
-              properties:
-                typ:
-                  type: string
-                  const: 'update_member'
-                room:
-                  type: string
-                permission:
-                  type: integer
-                  format: int32
-                user:
-                  type: string
-
-    Signed-RemoveMember:
-      type: object
-      properties:
-        sig:
-          type: string
-        signee:
-          type: object
-          properties:
-            nonce:
-              type: integer
-              format: uint32
-            timestamp:
-              type: integer
-              format: uint64
-            id_key:
-              type: string
-            act_key:
-              type: string
-            payload:
-              type: object
-              properties:
-                typ:
-                  type: string
-                  const: 'remove_member'
-                room:
-                  type: string
-                user:
-                  type: string
-
-    Signed-Chat:
-      type: object
-      properties:
-        sig:
-          type: string
-        signee:
-          type: object
-          properties:
-            nonce:
-              type: integer
-              format: uint32
-            timestamp:
-              type: integer
-              format: uint64
-            id_key:
-              type: string
-            act_key:
-              type: string
-            payload:
-              type: object
-              properties:
-                typ:
-                  type: string
-                  const: 'chat'
-                room:
-                  type: string
-                rich_text:
-                  $ref: '$/components/schemas/RichText'
-
-    WithMsgId-Signed-Chat:
-      allOf:
-        - $ref: '#/components/schemas/Signed-Chat'
-        - type: object
-          properties:
-            cid:
-              type: string
-              description: An opaque server-specific identifier.
-
-    Signed-CreateRoom:
-      type: object
-      properties:
-        sig:
-          type: string
-        signee:
-          type: object
-          properties:
-            nonce:
-              type: integer
-              format: uint32
-            timestamp:
-              type: integer
-              format: uint64
-            id_key:
-              type: string
-            act_key:
-              type: string
-            payload:
-              oneOf:
-                - type: object
-                  properties:
-                    typ:
-                      type: string
-                      const: 'create_room'
-                    title:
-                      type: string
-                - type: object
-                  properties:
-                    typ:
-                      type: string
-                      const: 'create_peer_chat'
-                    peer:
-                      type: string
-
-    Signed-DeleteRoom:
-      type: object
-      properties:
-        sig:
-          type: string
-        signee:
-          type: object
-          properties:
-            nonce:
-              type: integer
-              format: uint32
-            timestamp:
-              type: integer
-              format: uint64
-            id_key:
-              type: string
-            act_key:
-              type: string
-            payload:
-              type: object
-              properties:
-                typ:
-                  type: string
-                  const: 'delete_room'
-                room:
-                  type: integer
-                  format: in64
-
-    Signed-UserRegister:
-      type: object
-      properties:
-        sig:
-          type: string
-        signee:
-          type: object
-          properties:
-            nonce:
-              type: integer
-              format: uint32
-            timestamp:
-              type: integer
-              format: uint64
-            id_key:
-              type: string
-            act_key:
-              type: string
-            payload:
-              type: object
-              properties:
-                typ:
-                  type: string
-                  const: 'user_register'
-                server_url:
-                  type: string
-                  description: |
-                    The server URL to register on. Must matches chat server's base_url.
-                    It's path segment must be normalized, eg. always contains a `/` path for top-level.
-                id_url:
-                  type: string
-                  description: |
-                    The identity server URL. Must be in form `https://<domain>/`.
-                    It's path segment must be normalized, eg. always contains a `/` path for top-level.
-                id_key:
-                  type: string
-                  description: Hex encoded user primary key `id_key`.
-                challenge:
-                  type: object
-                  properties:
-                    pow:
-                      type: object
-                      properties:
-                        nonce:
-                          type: integer
-                          format: uint32
-                          description: The challenge nonce retrieved from a recent GET response of `/user/me`.
-
-    UserIdentityDescription:
-      type: object
-      properties:
-        id_key:
-          type: string
-
-        act_keys:
-          type: array
-          items:
-            type: object
-            properties:
-              sig:
-                type: string
-              signee:
-                type: object
-                properties:
-                  nonce:
-                    type: integer
-                    format: uint32
-                  timestamp:
-                    type: integer
-                    format: uint64
-                  id_key:
-                    type: string
-                  act_key:
-                    type: string
-                  payload:
-                    type: object
-                    properties:
-                      typ:
-                        type: string
-                        const: 'user_act_key'
-                      act_key:
-                        type: string
-                      expire_time:
-                        type: integer
-                        format: uint64
-                      comment:
-                        type: string
-
-        profile:
-          type: object
-          properties:
-            sig:
-              type: string
-            signee:
-              type: object
-              properties:
-                nonce:
-                  type: integer
-                  format: uint32
-                timestamp:
-                  type: integer
-                  format: uint64
-                id_key:
-                  type: string
-                act_key:
-                  type: string
-                payload:
-                  type: object
-                  properties:
-                    typ:
-                      type: string
-                      const: 'user_profile'
-                    preferred_chat_server_urls:
-                      type: array
-                      items:
-                        type: string
-                        format: url
-                    id_urls:
-                      type: array
-                      items:
-                        type: string
-                        format: url
+                $ref: 'types.json#/components/schemas/ServerMetadata'

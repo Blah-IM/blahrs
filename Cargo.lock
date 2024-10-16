@@ -280,6 +280,7 @@ dependencies = [
  "sha2",
  "thiserror",
  "url",
+ "utoipa",
 ]
 
 [[package]]
@@ -2691,6 +2692,30 @@ name = "utf8parse"
 version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "06abde3611657adf66d383f00b093d7faecc7fa57071cce2578660c9f1010821"
+
+[[package]]
+name = "utoipa"
+version = "5.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "845494cea2113cf53dbb60904638afc8cb6c36fe39be7bcbb0eca1cfa49c3c1a"
+dependencies = [
+ "indexmap 2.6.0",
+ "serde",
+ "serde_json",
+ "utoipa-gen",
+]
+
+[[package]]
+name = "utoipa-gen"
+version = "5.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e1223ed4a64c622737615a02d062c20813b978d9d39ceced627337449b195771"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+ "url",
+]
 
 [[package]]
 name = "valuable"

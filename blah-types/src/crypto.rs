@@ -11,6 +11,7 @@ use rand::RngCore;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct UserKey {
     pub id_key: PubKey,
     pub act_key: PubKey,
@@ -18,6 +19,7 @@ pub struct UserKey {
 
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(transparent)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema), schema(value_type = String))]
 pub struct PubKey(#[serde(with = "hex::serde")] pub [u8; PUBLIC_KEY_LENGTH]);
 
 impl FromStr for PubKey {
@@ -55,14 +57,17 @@ impl From<&VerifyingKey> for PubKey {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 #[serde(deny_unknown_fields)]
 pub struct Signed<T> {
     #[serde(with = "hex::serde")]
+    #[cfg_attr(feature = "utoipa", schema(value_type = String))]
     pub sig: [u8; SIGNATURE_LENGTH],
     pub signee: Signee<T>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 #[serde(deny_unknown_fields)]
 pub struct Signee<T> {
     pub nonce: u32,

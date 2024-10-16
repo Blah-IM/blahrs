@@ -10,6 +10,7 @@ use crate::PubKey;
 
 /// The response object returned as body on HTTP error status.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct ErrorResponse<S = String> {
     /// The error object.
     pub error: ErrorObject<S>,
@@ -18,21 +19,27 @@ pub struct ErrorResponse<S = String> {
 /// The response object of `/_blah/user/me` endpoint on HTTP error status.
 /// It contains additional registration information.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct ErrorResponseWithChallenge<S = String> {
     /// The error object.
     pub error: ErrorObject<S>,
 
     /// The challenge metadata returned by the `/_blah/user/me` endpoint for registration.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "utoipa", schema(nullable = false))]
     pub register_challenge: Option<UserRegisterChallenge>,
 }
 
 /// The error object.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct ErrorObject<S = String> {
     /// A machine-readable error code string.
+    #[cfg_attr(feature = "utoipa", schema(value_type = String, example = "user_not_found"))]
     pub code: S,
+
     /// A human-readable error message.
+    #[cfg_attr(feature = "utoipa", schema(value_type = String, example = "the user does not exist"))]
     pub message: S,
 }
 
@@ -50,16 +57,20 @@ impl<S: fmt::Display + fmt::Debug> std::error::Error for ErrorObject<S> {}
 /// It may contains extra fields and clients should ignore them for future compatibility.
 /// Chat Servers can also include any custom fields here as long they have a `_` prefix.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct ServerMetadata {
     /// A server-defined version string indicating its implementation name and the version.
     ///
     /// It is expected to be in form `<server-name>/<server-version>` but not mandatory.
+    #[cfg_attr(feature = "utoipa", schema(example = "blahd/0.0.1"))]
     pub server: String,
 
     /// The URL to the source code of the Chat Server.
     ///
     /// It is expected to be a public accessible maybe-compressed tarball link without
     /// access control.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "utoipa", schema(nullable = false))]
     pub src_url: Option<Url>,
 
     /// The server capabilities set.
@@ -67,6 +78,7 @@ pub struct ServerMetadata {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct ServerCapabilities {
     /// Whether registration is open to public.
     pub allow_public_register: bool,
@@ -74,6 +86,7 @@ pub struct ServerCapabilities {
 
 /// Registration challenge information.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum UserRegisterChallenge {
     /// Proof-of-work (PoW) challenge.
@@ -86,67 +99,82 @@ pub enum UserRegisterChallenge {
 
 /// Response to list rooms.
 #[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct RoomList {
     /// Result list of rooms.
     pub rooms: Vec<RoomMetadata>,
     /// The skip-token to fetch the next page.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "utoipa", schema(nullable = false))]
     pub skip_token: Option<Id>,
 }
 
 /// The metadata of a room.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct RoomMetadata {
     /// Room id.
     pub rid: Id,
     /// Plain text room title. None for peer chat.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "utoipa", schema(nullable = false))]
     pub title: Option<String>,
     /// Room attributes.
     pub attrs: RoomAttrs,
 
     // Extra information is only available for some APIs.
     /// The last message in the room.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "utoipa", schema(nullable = false))]
     pub last_msg: Option<SignedChatMsgWithId>,
     /// The current user's last seen message's `cid`.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "utoipa", schema(nullable = false))]
     pub last_seen_cid: Option<Id>,
     /// The number of unseen messages, ie. the number of messages from `last_seen_cid` to
     /// `last_msg.cid`.
     /// This may or may not be a precise number.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "utoipa", schema(nullable = false))]
     pub unseen_cnt: Option<u32>,
     /// The member permission of current user in the room, or `None` if it is not a member.
     /// Only available with authentication.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "utoipa", schema(nullable = false))]
     pub member_permission: Option<MemberPermission>,
     /// The peer user, if this is a peer chat room.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "utoipa", schema(nullable = false))]
     pub peer_user: Option<PubKey>,
 }
 
 /// Response to list room msgs.
 #[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct RoomMsgs {
     /// Result list of msgs.
     pub msgs: Vec<SignedChatMsgWithId>,
     /// The skip-token to fetch the next page.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "utoipa", schema(nullable = false))]
     pub skip_token: Option<Id>,
 }
 
 /// Response to list room members.
 #[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct RoomMemberList {
     /// Result list of members.
     pub members: Vec<RoomMember>,
     /// The skip-token to fetch the next page.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "utoipa", schema(nullable = false))]
     pub skip_token: Option<Id>,
 }
 
 /// The description of a room member.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct RoomMember {
     /// The identity key of the member user.
     pub id_key: PubKey,
@@ -154,11 +182,13 @@ pub struct RoomMember {
     pub permission: MemberPermission,
     /// The user's last seen message `cid` in the room.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "utoipa", schema(nullable = false))]
     pub last_seen_cid: Option<Id>,
 }
 
 /// A server-to-client event.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum ServerEvent {
     /// A message from a joined room.
@@ -170,5 +200,6 @@ pub enum ServerEvent {
 
 /// A client-to-server event.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum ClientEvent {}

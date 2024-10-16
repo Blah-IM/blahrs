@@ -12,6 +12,7 @@ use crate::{PubKey, Signed};
 /// User identity description structure.
 // TODO: Revise and shrink duplicates (pubkey fields).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct UserIdentityDesc {
     /// User primary identity key, only for signing action keys.
     pub id_key: PubKey,
@@ -90,6 +91,7 @@ impl UserIdentityDesc {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 #[serde(tag = "typ", rename = "user_act_key")]
 pub struct UserActKeyDesc {
     pub act_key: PubKey,
@@ -98,6 +100,7 @@ pub struct UserActKeyDesc {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 #[serde(tag = "typ", rename = "user_profile")]
 pub struct UserProfile {
     pub preferred_chat_server_urls: Vec<Url>,
@@ -105,6 +108,7 @@ pub struct UserProfile {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema), schema(value_type = Url))]
 #[serde(try_from = "Url")]
 pub struct IdUrl(Url);
 

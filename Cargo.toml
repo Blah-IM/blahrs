@@ -7,6 +7,9 @@ members = [
 ]
 default-members = ["blahd"]
 
+[workspace.dependencies]
+utoipa = "5"
+
 [workspace.lints.clippy]
 allow_attributes_without_reason = "warn"
 dbg_macro = "warn"
