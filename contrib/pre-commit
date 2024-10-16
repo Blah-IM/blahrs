@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
-typos
 cargo fmt -- --check
 fd -e nix | xargs nixfmt --check
+if ! out="$(cargo machete 2>/dev/null)"; then
+    echo "$out"
+    exit 1
+fi
+typos

@@ -37,6 +37,9 @@ jobs:
       - name: Rustdoc
         run: cargo doc --workspace --no-deps
 
+      - name: Unused dependencies
+        uses: bnjbvr/cargo-machete@v0.7.0
+
       - name: Typos
         uses: crate-ci/typos@v1.26.0
 
