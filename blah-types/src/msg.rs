@@ -55,9 +55,15 @@ impl<T> WithMsgId<T> {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "typ", rename = "user_register")]
 pub struct UserRegisterPayload {
+    /// The normalized server URL to register on.
+    /// It must matches chat server's base_url.
     pub server_url: Url,
+    /// The normalized identity URL.
+    /// It should be in form `https://<domain>/`.
     pub id_url: IdUrl,
+    /// Hex encoded user primary key (`id_key`).
     pub id_key: PubKey,
+    /// Server specific register challenge.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub challenge: Option<UserRegisterChallengeResponse>,
 }
@@ -68,7 +74,10 @@ pub struct UserRegisterPayload {
 pub enum UserRegisterChallengeResponse {
     /// Proof of work challenge containing the same nonce from server challenge request.
     /// The whole msg signee hash should have enough prefix zero bits.
-    Pow { nonce: u32 },
+    Pow {
+        /// The challenge nonce retrieved from a recent GET response of `/_blah/user/me`.
+        nonce: u32,
+    },
 }
 
 // FIXME: `deny_unknown_fields` breaks this.

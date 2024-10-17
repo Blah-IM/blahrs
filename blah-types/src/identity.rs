@@ -21,6 +21,7 @@ pub struct UserIdentityDesc {
     pub profile: Signed<UserProfile>,
 }
 
+/// Error on verifying [`UserIdentityDesc`].
 #[derive(Debug, Error)]
 #[error(transparent)]
 pub struct VerifyError(#[from] VerifyErrorImpl);
@@ -44,6 +45,7 @@ enum VerifyErrorImpl {
 }
 
 impl UserIdentityDesc {
+    /// The relative path from domain to the well-known identity description file.
     pub const WELL_KNOWN_PATH: &str = "/.well-known/blah/identity.json";
 
     /// Validate signatures of the identity description at given time.
@@ -89,21 +91,33 @@ impl UserIdentityDesc {
     }
 }
 
+/// Description of an action key.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "typ", rename = "user_act_key")]
 pub struct UserActKeyDesc {
+    /// Per-device action key for signing msgs.
     pub act_key: PubKey,
+    /// The UNIX timestamp of expire time.
     pub expire_time: u64,
+    /// User-provided arbitrary comment string.
     pub comment: String,
 }
 
+/// User profile describing their non-cryptographic metadata.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "typ", rename = "user_profile")]
 pub struct UserProfile {
+    /// Preferred chat servers ordered by decreasing preference, for starting private chats.
     pub preferred_chat_server_urls: Vec<Url>,
+    /// Allowed identity URLs (`id_url`) where this profile should be retrieved on.
     pub id_urls: Vec<IdUrl>,
 }
 
+/// Identity URL.
+///
+/// In short, it must be a valid URL in format `https?://some.domain.name(:\d+)?/`.
+/// Servers may pose additional requirement including: requiring HTTPS, rejecting ports,
+/// rejecting `localhost` or local hostnames, and etc.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(try_from = "Url")]
 pub struct IdUrl(Url);
@@ -128,6 +142,7 @@ impl IdUrl {
     /// which is 64. Adding the schema and port, it should still be below 80.
     ///
     /// Ref: <https://www.rfc-editor.org/rfc/rfc3280>
+    // TODO: IPFS URLs can be extensively long, should we keep this limit?
     pub const MAX_LEN: usize = 80;
 }
 
@@ -139,6 +154,7 @@ impl ops::Deref for IdUrl {
     }
 }
 
+/// Error on validating [`IdUrl`].
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 #[non_exhaustive]
 pub enum IdUrlError {

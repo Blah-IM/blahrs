@@ -10,12 +10,16 @@ use ed25519_dalek::{
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
 
+/// User pubkey pair to uniquely identity a user.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct UserKey {
+    /// The identity key (`id_key`).
     pub id_key: PubKey,
+    /// The action key (`act_key`).
     pub act_key: PubKey,
 }
 
+/// Raw Ed25519 public key, serialized in hex-encoded string.
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct PubKey(#[serde(with = "hex::serde")] pub [u8; PUBLIC_KEY_LENGTH]);

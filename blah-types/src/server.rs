@@ -128,7 +128,7 @@ pub struct RoomMetadata {
 /// Response to list room msgs.
 #[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RoomMsgs {
-    /// Result list of msgs.
+    /// Result list of msgs ordered in reverse of server-received time.
     pub msgs: Vec<SignedChatMsgWithId>,
     /// The skip-token to fetch the next page.
     #[serde(skip_serializing_if = "Option::is_none")]
