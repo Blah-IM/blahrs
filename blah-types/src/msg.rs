@@ -18,6 +18,8 @@ use crate::{PubKey, Signed};
 #[serde(transparent)]
 pub struct Id(#[serde_as(as = "DisplayFromStr")] pub i64);
 
+impl_json_schema_as!(Id => String);
+
 impl fmt::Display for Id {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.0.fmt(f)
@@ -39,6 +41,7 @@ impl Id {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 pub struct WithMsgId<T> {
     pub cid: Id,
     #[serde(flatten)]
@@ -53,6 +56,7 @@ impl<T> WithMsgId<T> {
 
 /// Register a user on a chat server.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 #[serde(tag = "typ", rename = "user_register")]
 pub struct UserRegisterPayload {
     /// The normalized server URL to register on.
@@ -70,6 +74,7 @@ pub struct UserRegisterPayload {
 
 /// The server-specific challenge data for registration.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum UserRegisterChallengeResponse {
     /// Proof of work challenge containing the same nonce from server challenge request.
@@ -82,6 +87,7 @@ pub enum UserRegisterChallengeResponse {
 
 // FIXME: `deny_unknown_fields` breaks this.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 #[serde(tag = "typ", rename = "chat")]
 pub struct ChatPayload {
     pub rich_text: RichText,
@@ -92,6 +98,8 @@ pub struct ChatPayload {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 #[serde(transparent)]
 pub struct RichText(pub Vec<RichTextPiece>);
+
+impl_json_schema_as!(RichText => Vec<RichTextPieceRaw>);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RichTextPiece {
@@ -112,8 +120,9 @@ impl Serialize for RichTextPiece {
     }
 }
 
-/// The protocol representation of `RichTextPiece`.
+/// The representation on wire of `RichTextPiece`.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 #[serde(untagged)]
 enum RichTextPieceRaw {
     Text(String),
@@ -157,6 +166,7 @@ impl<'de> Deserialize<'de> for RichText {
 
 // TODO: This protocol format is quite large. Could use bitflags for database.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 pub struct TextAttrs {
     #[serde(default, rename = "b", skip_serializing_if = "is_default")]
     pub bold: bool,
@@ -280,6 +290,7 @@ pub type SignedChatMsg = Signed<ChatPayload>;
 pub type SignedChatMsgWithId = WithMsgId<SignedChatMsg>;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 #[serde(tag = "typ")]
 pub enum CreateRoomPayload {
     #[serde(rename = "create_room")]
@@ -290,6 +301,7 @@ pub enum CreateRoomPayload {
 
 /// Multi-user room.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 pub struct CreateGroup {
     pub attrs: RoomAttrs,
     pub title: String,
@@ -297,11 +309,13 @@ pub struct CreateGroup {
 
 /// Peer-to-peer chat room with exactly two symmetric users.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 pub struct CreatePeerChat {
     pub peer: PubKey,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 #[serde(tag = "typ", rename = "delete_room")]
 pub struct DeleteRoomPayload {
     pub room: Id,
@@ -311,6 +325,7 @@ pub struct DeleteRoomPayload {
 /// 1. Sorted by userkeys.
 /// 2. No duplicated users.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 #[serde(try_from = "Vec<RoomMember>")]
 pub struct RoomMemberList(pub Vec<RoomMember>);
 
@@ -336,6 +351,7 @@ impl TryFrom<Vec<RoomMember>> for RoomMemberList {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 pub struct RoomMember {
     pub permission: MemberPermission,
     pub user: PubKey,
@@ -345,11 +361,13 @@ pub struct RoomMember {
 ///
 /// TODO: Should we use JWT here instead?
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 #[serde(tag = "typ", rename = "auth")]
 pub struct AuthPayload {}
 
 // FIXME: Remove this.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 // `typ` is provided by `RoomAdminOp`.
 pub struct RoomAdminPayload {
     #[serde(flatten)]
@@ -357,6 +375,7 @@ pub struct RoomAdminPayload {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 #[serde(tag = "typ", rename_all = "snake_case", rename = "remove_member")]
 pub struct RemoveMemberPayload {
     pub room: Id,
@@ -366,6 +385,7 @@ pub struct RemoveMemberPayload {
 
 // TODO: Maybe disallow adding other user without consent?
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 #[serde(tag = "typ", rename_all = "snake_case", rename = "add_member")]
 pub struct AddMemberPayload {
     pub room: Id,
@@ -374,6 +394,7 @@ pub struct AddMemberPayload {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 #[serde(tag = "typ", rename_all = "snake_case", rename = "update_member")]
 pub struct UpdateMemberPayload {
     pub room: Id,
@@ -382,6 +403,7 @@ pub struct UpdateMemberPayload {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 #[serde(untagged)]
 pub enum RoomAdminOp {
     AddMember(AddMemberPayload),
@@ -436,6 +458,10 @@ bitflags::bitflags! {
 impl_serde_for_bitflags!(ServerPermission);
 impl_serde_for_bitflags!(MemberPermission);
 impl_serde_for_bitflags!(RoomAttrs);
+
+impl_json_schema_as!(ServerPermission => i32);
+impl_json_schema_as!(MemberPermission => i32);
+impl_json_schema_as!(RoomAttrs => i32);
 
 #[cfg(feature = "rusqlite")]
 mod sql_impl {

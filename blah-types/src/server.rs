@@ -10,6 +10,7 @@ use crate::PubKey;
 
 /// The response object returned as body on HTTP error status.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 pub struct ErrorResponse<S = String> {
     /// The error object.
     pub error: ErrorObject<S>,
@@ -18,6 +19,7 @@ pub struct ErrorResponse<S = String> {
 /// The response object of `/_blah/user/me` endpoint on HTTP error status.
 /// It contains additional registration information.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 pub struct ErrorResponseWithChallenge<S = String> {
     /// The error object.
     pub error: ErrorObject<S>,
@@ -29,10 +31,14 @@ pub struct ErrorResponseWithChallenge<S = String> {
 
 /// The error object.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 pub struct ErrorObject<S = String> {
     /// A machine-readable error code string.
+    #[cfg_attr(feature = "schemars", schemars(with = "String"))]
     pub code: S,
+
     /// A human-readable error message.
+    #[cfg_attr(feature = "schemars", schemars(with = "String"))]
     pub message: S,
 }
 
@@ -50,6 +56,7 @@ impl<S: fmt::Display + fmt::Debug> std::error::Error for ErrorObject<S> {}
 /// It may contains extra fields and clients should ignore them for future compatibility.
 /// Chat Servers can also include any custom fields here as long they have a `_` prefix.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 pub struct ServerMetadata {
     /// A server-defined version string indicating its implementation name and the version.
     ///
@@ -60,6 +67,7 @@ pub struct ServerMetadata {
     ///
     /// It is expected to be a public accessible maybe-compressed tarball link without
     /// access control.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub src_url: Option<Url>,
 
     /// The server capabilities set.
@@ -67,6 +75,7 @@ pub struct ServerMetadata {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 pub struct ServerCapabilities {
     /// Whether registration is open to public.
     pub allow_public_register: bool,
@@ -74,6 +83,7 @@ pub struct ServerCapabilities {
 
 /// Registration challenge information.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum UserRegisterChallenge {
     /// Proof-of-work (PoW) challenge.
@@ -86,6 +96,7 @@ pub enum UserRegisterChallenge {
 
 /// Response to list rooms.
 #[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 pub struct RoomList {
     /// Result list of rooms.
     pub rooms: Vec<RoomMetadata>,
@@ -96,6 +107,7 @@ pub struct RoomList {
 
 /// The metadata of a room.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 pub struct RoomMetadata {
     /// Room id.
     pub rid: Id,
@@ -127,6 +139,7 @@ pub struct RoomMetadata {
 
 /// Response to list room msgs.
 #[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 pub struct RoomMsgs {
     /// Result list of msgs ordered in reverse of server-received time.
     pub msgs: Vec<SignedChatMsgWithId>,
@@ -137,6 +150,7 @@ pub struct RoomMsgs {
 
 /// Response to list room members.
 #[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 pub struct RoomMemberList {
     /// Result list of members.
     pub members: Vec<RoomMember>,
@@ -147,6 +161,7 @@ pub struct RoomMemberList {
 
 /// The description of a room member.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 pub struct RoomMember {
     /// The identity key of the member user.
     pub id_key: PubKey,
@@ -159,6 +174,7 @@ pub struct RoomMember {
 
 /// A server-to-client event.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum ServerEvent {
     /// A message from a joined room.
@@ -170,5 +186,6 @@ pub enum ServerEvent {
 
 /// A client-to-server event.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum ClientEvent {}

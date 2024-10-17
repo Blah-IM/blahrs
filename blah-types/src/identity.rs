@@ -12,6 +12,7 @@ use crate::{PubKey, Signed};
 /// User identity description structure.
 // TODO: Revise and shrink duplicates (pubkey fields).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 pub struct UserIdentityDesc {
     /// User primary identity key, only for signing action keys.
     pub id_key: PubKey,
@@ -93,6 +94,7 @@ impl UserIdentityDesc {
 
 /// Description of an action key.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 #[serde(tag = "typ", rename = "user_act_key")]
 pub struct UserActKeyDesc {
     /// Per-device action key for signing msgs.
@@ -105,6 +107,7 @@ pub struct UserActKeyDesc {
 
 /// User profile describing their non-cryptographic metadata.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 #[serde(tag = "typ", rename = "user_profile")]
 pub struct UserProfile {
     /// Preferred chat servers ordered by decreasing preference, for starting private chats.
@@ -121,6 +124,8 @@ pub struct UserProfile {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(try_from = "Url")]
 pub struct IdUrl(Url);
+
+impl_json_schema_as!(IdUrl => Url);
 
 impl fmt::Display for IdUrl {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

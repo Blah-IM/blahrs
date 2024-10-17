@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 
 /// User pubkey pair to uniquely identity a user.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 pub struct UserKey {
     /// The identity key (`id_key`).
     pub id_key: PubKey,
@@ -23,6 +24,8 @@ pub struct UserKey {
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct PubKey(#[serde(with = "hex::serde")] pub [u8; PUBLIC_KEY_LENGTH]);
+
+impl_json_schema_as!(PubKey => String);
 
 impl FromStr for PubKey {
     type Err = hex::FromHexError;
@@ -59,14 +62,21 @@ impl From<&VerifyingKey> for PubKey {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 #[serde(deny_unknown_fields)]
 pub struct Signed<T> {
-    #[serde(with = "hex::serde")]
+    // Workaround: https://github.com/GREsau/schemars/issues/89
+    #[serde(
+        serialize_with = "hex::serde::serialize",
+        deserialize_with = "hex::serde::deserialize"
+    )]
+    #[cfg_attr(feature = "schemars", schemars(with = "String"))]
     pub sig: [u8; SIGNATURE_LENGTH],
     pub signee: Signee<T>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 #[serde(deny_unknown_fields)]
 pub struct Signee<T> {
     pub nonce: u32,
