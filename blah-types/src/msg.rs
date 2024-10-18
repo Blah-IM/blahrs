@@ -3,9 +3,7 @@ use std::fmt;
 use std::num::ParseIntError;
 use std::str::FromStr;
 
-use bitflags_serde_shim::impl_serde_for_bitflags;
 use serde::{de, ser, Deserialize, Serialize};
-use serde_with::{serde_as, DisplayFromStr};
 use url::Url;
 
 use crate::identity::IdUrl;
@@ -13,12 +11,25 @@ use crate::{PubKey, Signed};
 
 /// An opaque server-specific ID for rooms, messages, and etc.
 /// It's currently serialized as a string for JavaScript's convenience.
-#[serde_as]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-#[serde(transparent)]
-pub struct Id(#[serde_as(as = "DisplayFromStr")] pub i64);
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Id(pub i64);
 
 impl_json_schema_as!(Id => String);
+
+impl Serialize for Id {
+    fn serialize<S: ser::Serializer>(&self, ser: S) -> Result<S::Ok, S::Error> {
+        // TODO: No alloc?
+        self.0.to_string().serialize(ser)
+    }
+}
+
+impl<'de> Deserialize<'de> for Id {
+    fn deserialize<D: de::Deserializer<'de>>(de: D) -> Result<Self, D::Error> {
+        let s = <&str>::deserialize(de)?;
+        s.parse()
+            .map_err(|_| de::Error::invalid_value(de::Unexpected::Str(s), &"a stringified integer"))
+    }
+}
 
 impl fmt::Display for Id {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -455,13 +466,27 @@ bitflags::bitflags! {
     }
 }
 
-impl_serde_for_bitflags!(ServerPermission);
-impl_serde_for_bitflags!(MemberPermission);
-impl_serde_for_bitflags!(RoomAttrs);
+macro_rules! impl_for_bitflags {
+    ($($ty:ty),* $(,)?) => {
+        $(
+            impl Serialize for $ty {
+                fn serialize<S: ser::Serializer>(&self, ser: S) -> Result<S::Ok, S::Error> {
+                    self.bits().serialize(ser)
+                }
+            }
 
-impl_json_schema_as!(ServerPermission => i32);
-impl_json_schema_as!(MemberPermission => i32);
-impl_json_schema_as!(RoomAttrs => i32);
+            impl<'de> Deserialize<'de> for $ty {
+                fn deserialize<D: de::Deserializer<'de>>(de: D) -> Result<Self, D::Error> {
+                    <_>::deserialize(de).map(Self::from_bits_retain)
+                }
+            }
+
+            impl_json_schema_as!($ty => <$ty as bitflags::Flags>::Bits);
+        )*
+    };
+}
+
+impl_for_bitflags!(ServerPermission, MemberPermission, RoomAttrs);
 
 #[cfg(test)]
 mod tests {

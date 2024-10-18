@@ -14,7 +14,7 @@ macro_rules! impl_json_schema_as {
 // Workaround: https://github.com/GREsau/schemars/issues/267
 #[cfg(feature = "schemars")]
 macro_rules! impl_json_schema_as {
-    ($ty:ident => $as_ty:ty) => {
+    ($ty:ty => $as_ty:ty) => {
         impl schemars::JsonSchema for $ty {
             fn schema_name() -> String {
                 stringify!($ty).into()

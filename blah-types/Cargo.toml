@@ -4,9 +4,11 @@ version = "0.0.0"
 edition = "2021"
 
 [features]
-default = []
-unsafe_use_mock_instant_for_testing = ["dep:mock_instant"]
+default = ["ed25519-dalek/default"]
 schemars = ["dep:schemars"]
+rusqlite = ["dep:rusqlite"]
+
+unsafe_use_mock_instant_for_testing = ["dep:mock_instant"]
 
 [[bench]]
 name = "crypto_ops"
@@ -14,24 +16,28 @@ harness = false
 
 [dependencies]
 bitflags = "2"
-bitflags_serde_shim = "0.2"
-ed25519-dalek = "2"
+ed25519-dalek = { version = "2", default-features = false }
 hex = { version = "0.4", features = ["serde"] }
 html-escape = "0.2"
-mock_instant = { version = "0.5", optional = true }
 rand = "0.8"
-rusqlite = { version = "0.32", optional = true }
 serde = { version = "1", features = ["derive"] }
 serde_jcs = "0.1"
 serde_json = "1"
-serde_with = "3"
 thiserror = "1"
 url = { version = "2", features = ["serde"] }
+
+[dependencies.rusqlite]
+version = "0.32"
+optional = true
 
 [dependencies.schemars]
 version = "0.8"
 optional = true
 features = ["url"]
+
+[dependencies.mock_instant]
+version = "0.5"
+optional = true
 
 [dev-dependencies]
 criterion = "0.5"
