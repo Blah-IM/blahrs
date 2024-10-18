@@ -10,8 +10,10 @@ use blah_types::msg::{
 use blah_types::server::RoomMetadata;
 use blah_types::{Id, PubKey, Signee, UserKey};
 use parking_lot::Mutex;
+use rusqlite::types::FromSqlError;
 use rusqlite::{named_params, params, prepare_cached_and_bind, Connection, OpenFlags, Row};
 use serde::Deserialize;
+use serde_json::value::RawValue as JsonRawValue;
 
 use crate::middleware::ApiError;
 
@@ -169,6 +171,27 @@ fn parse_room_metadata(row: &Row<'_>) -> Result<RoomMetadata> {
 
 pub trait TransactionOps {
     fn conn(&self) -> &Connection;
+
+    fn get_user_id_desc_by_uid(&self, uid: i64) -> Result<Box<JsonRawValue>> {
+        prepare_cached_and_bind!(
+            self.conn(),
+            r"
+            SELECT `id_desc`
+            FROM `user`
+            WHERE `uid` = :uid
+            "
+        )
+        .raw_query()
+        .and_then(|row| {
+            let json = JsonRawValue::from_string(row.get(0)?).map_err(|err| {
+                FromSqlError::Other(format!("invalid id_desc in database: {err}").into())
+            })?;
+            Ok::<_, rusqlite::Error>(json)
+        })
+        .next()
+        .ok_or(ApiError::UserNotFound)?
+        .map_err(Into::into)
+    }
 
     fn get_user(&self, UserKey { id_key, act_key }: &UserKey) -> Result<(i64, ServerPermission)> {
         prepare_cached_and_bind!(

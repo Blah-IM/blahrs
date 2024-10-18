@@ -17,7 +17,7 @@ use blah_types::msg::{
 };
 use blah_types::server::{
     RoomList, RoomMember, RoomMemberList, RoomMetadata, RoomMsgs, ServerEvent, ServerMetadata,
-    UserRegisterChallenge,
+    UserIdentityDescResponse, UserRegisterChallenge,
 };
 use blah_types::{Id, SignExt, Signed, UserKey};
 use blahd::{AppState, Database};
@@ -31,6 +31,7 @@ use rstest::{fixture, rstest};
 use rusqlite::{params, Connection};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 use sha2::{Digest, Sha256};
 use tokio::net::TcpListener;
 
@@ -68,6 +69,7 @@ nonce_rotate_secs = 60
 };
 
 struct User {
+    name: u8,
     pubkeys: UserKey,
     id_priv: SigningKey,
     act_priv: SigningKey,
@@ -79,6 +81,7 @@ impl User {
         let id_priv = SigningKey::from_bytes(&[b; 32]);
         let act_priv = SigningKey::from_bytes(&[b.to_ascii_lowercase(); 32]);
         Self {
+            name: b,
             pubkeys: UserKey {
                 id_key: id_priv.verifying_key().into(),
                 act_key: act_priv.verifying_key().into(),
@@ -433,7 +436,7 @@ fn server() -> Server {
             .prepare(
                 r"
                 INSERT INTO `user` (`id_key`, `permission`, `last_fetch_time`, `id_desc`)
-                VALUES (?, ?, 0, '{}')
+                VALUES (?, ?, 0, ?)
                 ",
             )
             .unwrap();
@@ -449,8 +452,10 @@ fn server() -> Server {
             (&*ALICE, ServerPermission::ALL),
             (&BOB, ServerPermission::empty()),
         ] {
+            // Fake value.
+            let id_desc = json!({"user": user.name as char }).to_string();
             add_user
-                .execute(params![user.pubkeys.id_key, perm])
+                .execute(params![user.pubkeys.id_key, perm, id_desc])
                 .unwrap();
             let uid = conn.last_insert_rowid();
             add_act_key
@@ -1792,4 +1797,45 @@ async fn room_mgmt_perm(server: Server) {
 
     // Bob can chat again.
     server.post_chat(rid, &BOB, "yay").await.unwrap();
+}
+
+#[rstest]
+#[tokio::test]
+async fn get_member_id_desc(server: Server) {
+    let rid = server
+        .create_room(&ALICE, RoomAttrs::PUBLIC_JOINABLE, "public")
+        .await
+        .unwrap();
+
+    let get_id_desc = |src_user: &User, tgt_user: &User| {
+        server
+            .get::<UserIdentityDescResponse<Box<serde_json::value::Value>>>(
+                &format!("/room/{rid}/member/{}/identity", tgt_user.pubkeys.id_key),
+                Some(&auth(src_user)),
+            )
+            .map_ok(|desc| desc.identity["user"].as_str().unwrap().to_owned())
+    };
+
+    // Current user not in the room.
+    get_id_desc(&BOB, &ALICE)
+        .await
+        .expect_api_err(StatusCode::NOT_FOUND, "room_not_found");
+
+    // Target user not in the room.
+    get_id_desc(&ALICE, &BOB)
+        .await
+        .expect_api_err(StatusCode::NOT_FOUND, "member_not_found");
+
+    // OK, get self.
+    let desc = get_id_desc(&ALICE, &ALICE).await.unwrap();
+    assert_eq!(desc, "A");
+
+    server
+        .join_room(rid, &BOB, MemberPermission::MAX_SELF_ADD)
+        .await
+        .unwrap();
+
+    // Ok, get member.
+    let desc = get_id_desc(&ALICE, &BOB).await.unwrap();
+    assert_eq!(desc, "B");
 }

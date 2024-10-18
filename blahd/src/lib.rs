@@ -18,7 +18,7 @@ use blah_types::msg::{
 };
 use blah_types::server::{
     ErrorResponseWithChallenge, RoomList, RoomMember, RoomMemberList, RoomMetadata, RoomMsgs,
-    ServerCapabilities, ServerMetadata,
+    ServerCapabilities, ServerMetadata, UserIdentityDescResponse,
 };
 use blah_types::{get_timestamp, Id, PubKey, Signed, UserKey};
 use data_encoding::BASE64_NOPAD;
@@ -29,6 +29,7 @@ use parking_lot::Mutex;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_inline_default::serde_inline_default;
+use serde_json::value::RawValue as JsonRawValue;
 use sha2::Digest;
 use url::Url;
 use utils::ExpiringSet;
@@ -172,7 +173,8 @@ pub fn router(st: Arc<AppState>) -> Router {
         // TODO!: remove this.
         .route("/room/:rid/admin", r().post(post_room_admin))
         .route("/room/:rid/member", r().get(list_room_member).post(post_room_member))
-        .route("/room/:rid/member/:uid", r().get(get_room_member).delete(delete_room_member).patch(patch_room_member))
+        .route("/room/:rid/member/:idkey", r().get(get_room_member).delete(delete_room_member).patch(patch_room_member))
+        .route("/room/:rid/member/:idkey/identity", r().get(get_room_member_identity))
         .fallback(fallback_route)
         ;
 
@@ -617,6 +619,20 @@ async fn patch_room_member(
         // Checked to exist.
         txn.update_room_member(rid, tgt_uid, op_member.permission)?;
         Ok(NoContent)
+    })
+}
+
+async fn get_room_member_identity(
+    st: ArcState,
+    R(Path((rid, id_key)), _): RE<Path<(Id, PubKey)>>,
+    Auth(user): Auth,
+) -> Result<Json<UserIdentityDescResponse<Box<JsonRawValue>>>, ApiError> {
+    st.db.with_read(|txn| {
+        // Check membership.
+        let _ = txn.get_room_member(rid, &user)?;
+        let (uid, ..) = txn.get_room_member_by_id_key(rid, &id_key)?;
+        let identity = txn.get_user_id_desc_by_uid(uid)?;
+        Ok(Json(UserIdentityDescResponse { identity }))
     })
 }
 

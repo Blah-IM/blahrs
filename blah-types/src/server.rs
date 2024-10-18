@@ -5,6 +5,7 @@ use std::fmt;
 use serde::{Deserialize, Serialize};
 use url::Url;
 
+use crate::identity::UserIdentityDesc;
 use crate::msg::{Id, MemberPermission, RoomAttrs, SignedChatMsgWithId};
 use crate::PubKey;
 
@@ -170,6 +171,15 @@ pub struct RoomMember {
     /// The user's last seen message `cid` in the room.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_seen_cid: Option<Id>,
+}
+
+/// Server cached user identity description.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
+pub struct UserIdentityDescResponse<I = UserIdentityDesc> {
+    /// The identity description of the requested user.
+    #[cfg_attr(feature = "schemars", schemars(with = "UserIdentityDesc"))]
+    pub identity: I,
 }
 
 /// A server-to-client event.

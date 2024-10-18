@@ -688,6 +688,31 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiError'
 
+  /_blah/room/{rid}/member/{member_id_key}/identity:
+    get:
+      summary: Get identity description of a room member
+
+      parameters:
+        - name: Authorization
+          in: header
+          description: User authentication token.
+          schema:
+            $ref: '#/components/schemas/Signed-Auth'
+
+      responses:
+        200:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserIdentityDescResponse'
+
+        404:
+          description: |
+            Room does not exist, or either user is not a room member.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
 
 # Ideally we should generate these from src, but we need to
 # WAIT: https://github.com/juhaku/utoipa/pull/1034
