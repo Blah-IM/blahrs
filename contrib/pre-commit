@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+cd "$(git rev-parse --show-toplevel)"
 cargo fmt -- --check
 fd -e nix | xargs nixfmt --check
 if ! out="$(cargo machete 2>/dev/null)"; then
