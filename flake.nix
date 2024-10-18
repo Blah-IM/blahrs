@@ -105,6 +105,10 @@ rec {
 
             env.RUST_LOG = "blahd=debug,blahctl=debug";
           };
+
+          without-rust = self.devShells.${system}.default.overrideAttrs (old: {
+            nativeBuildInputs = lib.filter (drv: drv.pname != "rust-default") old.nativeBuildInputs;
+          });
         }
       );
 
