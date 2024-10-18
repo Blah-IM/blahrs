@@ -35,3 +35,6 @@ pub mod crypto;
 pub mod identity;
 pub mod msg;
 pub mod server;
+
+#[cfg(feature = "rusqlite")]
+mod rusqlite_impl;
