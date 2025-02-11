@@ -8,7 +8,7 @@ use axum::extract::rejection::{JsonRejection, PathRejection, QueryRejection};
 use axum::extract::{FromRef, FromRequest, FromRequestParts, Request};
 use axum::http::{header, request, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, IntoResponseParts, Response, ResponseParts};
-use axum::{async_trait, Json};
+use axum::Json;
 use blah_types::msg::AuthPayload;
 use blah_types::server::ErrorObject;
 use blah_types::{Signed, UserKey};
@@ -158,7 +158,6 @@ impl From<rusqlite::Error> for ApiError {
 #[derive(Debug)]
 pub struct SignedJson<T>(pub Signed<T>);
 
-#[async_trait]
 impl<S, T> FromRequest<S> for SignedJson<T>
 where
     S: Send + Sync,
@@ -216,7 +215,6 @@ pub type MaybeAuth = Result<Auth, AuthRejection>;
 #[derive(Debug)]
 pub struct Auth(pub UserKey);
 
-#[async_trait]
 impl<S> FromRequestParts<S> for Auth
 where
     S: Send + Sync,
@@ -249,7 +247,6 @@ where
 #[derive(Debug, Clone)]
 pub struct ETag<T>(pub Option<T>);
 
-#[async_trait]
 impl<S, T: FromStr> FromRequestParts<S> for ETag<T>
 where
     S: Send + Sync,
@@ -282,15 +279,5 @@ impl<T: fmt::Display> IntoResponseParts for ETag<T> {
             );
         }
         Ok(res)
-    }
-}
-
-// WAIT: https://github.com/tokio-rs/axum/pull/2978
-#[derive(Debug, Clone, Copy)]
-pub struct NoContent;
-
-impl IntoResponse for NoContent {
-    fn into_response(self) -> Response {
-        StatusCode::NO_CONTENT.into_response()
     }
 }

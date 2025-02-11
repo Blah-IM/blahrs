@@ -7,7 +7,7 @@ use anyhow::Result;
 use axum::body::Bytes;
 use axum::extract::{Path, Query, State};
 use axum::http::{header, HeaderName, HeaderValue, StatusCode};
-use axum::response::{IntoResponse, Response};
+use axum::response::{IntoResponse, NoContent, Response};
 use axum::routing::MethodRouter;
 use axum::{Json, Router};
 use axum_extra::extract::WithRejection as R;
@@ -24,7 +24,7 @@ use blah_types::{get_timestamp, Id, PubKey, Signed, UserKey};
 use data_encoding::BASE64_NOPAD;
 use database::{Transaction, TransactionOps};
 use id::IdExt;
-use middleware::{Auth, ETag, MaybeAuth, NoContent, ResultExt as _, SignedJson};
+use middleware::{Auth, ETag, MaybeAuth, ResultExt as _, SignedJson};
 use parking_lot::Mutex;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Deserializer, Serialize};
@@ -151,7 +151,7 @@ impl AppState {
 type ArcState = State<Arc<AppState>>;
 
 pub fn router(st: Arc<AppState>) -> Router {
-    let r = || MethodRouter::new().fallback(fallback_method_route);
+    let r = MethodRouter::new;
 
     // NB. Use consistent handler naming: `<method>_<path>[_<details>]`.
     // Use prefix `list` for GET with pagination.
@@ -165,16 +165,17 @@ pub fn router(st: Arc<AppState>) -> Router {
         .route("/room", r().get(list_room).post(post_room))
         // TODO!: remove this.
         .route("/room/create", r().post(post_room))
-        .route("/room/:rid", r().get(get_room).delete(delete_room))
-        .route("/room/:rid/feed.json", r().get(feed::get_room_feed::<feed::JsonFeed>))
-        .route("/room/:rid/feed.atom", r().get(feed::get_room_feed::<feed::AtomFeed>))
-        .route("/room/:rid/msg", r().get(list_room_msg).post(post_room_msg))
-        .route("/room/:rid/msg/:cid/seen", r().post(post_room_msg_seen))
+        .route("/room/{rid}", r().get(get_room).delete(delete_room))
+        .route("/room/{rid}/feed.json", r().get(feed::get_room_feed::<feed::JsonFeed>))
+        .route("/room/{rid}/feed.atom", r().get(feed::get_room_feed::<feed::AtomFeed>))
+        .route("/room/{rid}/msg", r().get(list_room_msg).post(post_room_msg))
+        .route("/room/{rid}/msg/{cid}/seen", r().post(post_room_msg_seen))
         // TODO!: remove this.
-        .route("/room/:rid/admin", r().post(post_room_admin))
-        .route("/room/:rid/member", r().get(list_room_member).post(post_room_member))
-        .route("/room/:rid/member/:idkey", r().get(get_room_member).delete(delete_room_member).patch(patch_room_member))
-        .route("/room/:rid/member/:idkey/identity", r().get(get_room_member_identity))
+        .route("/room/{rid}/admin", r().post(post_room_admin))
+        .route("/room/{rid}/member", r().get(list_room_member).post(post_room_member))
+        .route("/room/{rid}/member/{idkey}", r().get(get_room_member).delete(delete_room_member).patch(patch_room_member))
+        .route("/room/{rid}/member/{idkey}/identity", r().get(get_room_member_identity))
+        .method_not_allowed_fallback(fallback_method_route)
         .fallback(fallback_route)
         ;
 

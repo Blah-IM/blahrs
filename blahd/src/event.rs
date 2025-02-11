@@ -96,7 +96,7 @@ impl WsSenderWrapper<'_, '_> {
         let data = serde_json::to_string(&msg).expect("serialization cannot fail");
         let fut = tokio::time::timeout(
             self.config.send_timeout_sec,
-            self.inner.send(Message::Text(data)),
+            self.inner.send(Message::Text(data.into())),
         );
         match fut.await {
             Ok(Ok(())) => Ok(()),

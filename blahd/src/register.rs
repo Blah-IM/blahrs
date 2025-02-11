@@ -2,6 +2,7 @@ use std::num::NonZero;
 use std::time::Duration;
 
 use anyhow::{anyhow, ensure};
+use axum::response::NoContent;
 use blah_types::get_timestamp;
 use blah_types::identity::{IdUrl, UserIdentityDesc};
 use blah_types::msg::{UserRegisterChallengeResponse, UserRegisterPayload};
@@ -14,7 +15,7 @@ use serde::Deserialize;
 use sha2::{Digest, Sha256};
 
 use crate::database::TransactionOps;
-use crate::middleware::{NoContent, SignedJson};
+use crate::middleware::SignedJson;
 use crate::utils::Instant;
 use crate::{ApiError, ArcState, SERVER_AND_VERSION};
 

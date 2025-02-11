@@ -168,9 +168,7 @@ impl Server {
         let url = format!("ws://{}/_blah/ws", self.domain());
         let (mut ws, _) = tokio_tungstenite::connect_async(url).await.unwrap();
         if let Some(user) = auth_user {
-            ws.send(tokio_tungstenite::tungstenite::Message::Text(auth(user)))
-                .await
-                .unwrap();
+            ws.send(auth(user).into()).await.unwrap();
         }
         Ok(ws
             .map(|ret| {
