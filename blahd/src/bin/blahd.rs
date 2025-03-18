@@ -65,7 +65,7 @@ async fn main_serve(db: Database, config: Config) -> Result<()> {
                 .context("failed to listen on socket")?,
         ),
         ListenConfig::Systemd(_) => {
-            use rustix::net::{getsockname, SocketAddrAny};
+            use rustix::net::{getsockname, SocketAddr};
 
             let [fd] = sd_notify::listen_fds()
                 .context("failed to get fds from sd_listen_fds(3)")?
@@ -76,19 +76,18 @@ async fn main_serve(db: Database, config: Config) -> Result<()> {
             let listener = unsafe { OwnedFd::from_raw_fd(fd) };
 
             let addr = getsockname(&listener).context("failed to getsockname")?;
-            match addr {
-                SocketAddrAny::V4(_) | SocketAddrAny::V6(_) => {
-                    let listener = std::net::TcpListener::from(listener);
-                    listener
-                        .set_nonblocking(true)
-                        .context("failed to set socket non-blocking")?;
-                    let listener = tokio::net::TcpListener::from_std(listener)
-                        .context("failed to register async socket")?;
-                    (format!("tcp socket {addr:?} from LISTEN_FDS"), listener)
-                }
+            if let Ok(addr) = SocketAddr::try_from(addr.clone()) {
+                let listener = std::net::TcpListener::from(listener);
+                listener
+                    .set_nonblocking(true)
+                    .context("failed to set socket non-blocking")?;
+                let listener = tokio::net::TcpListener::from_std(listener)
+                    .context("failed to register async socket")?;
+                (format!("tcp socket {addr:?} from LISTEN_FDS"), listener)
+            } else {
                 // Unix socket support for axum is currently overly complex.
                 // WAIT: https://github.com/tokio-rs/axum/pull/2479
-                _ => bail!("unsupported socket type from LISTEN_FDS: {addr:?}"),
+                bail!("unsupported socket type from LISTEN_FDS: {addr:?}");
             }
         }
     };

@@ -111,7 +111,7 @@ impl<T: fmt::Debug> ResultExt for Result<T> {
         assert_eq!(
             (err.status, &*err.code),
             (status, code),
-            "unexpecteed API error: {err}",
+            "unexpected API error: {err}",
         );
     }
 

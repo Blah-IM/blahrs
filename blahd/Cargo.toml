@@ -23,8 +23,8 @@ parking_lot = "0.12" # Maybe no better performance, just that we hate poisoning.
 paste = "1.0.15"
 rand = "0.8"
 reqwest = "0.12"
-rusqlite = { version = "0.33", features = ["rusqlite-macros"] }
-rustix = { version = "0.38", features = ["net"] }
+rusqlite = { version = "0.34", features = ["rusqlite-macros"] }
+rustix = { version = "1", features = ["net"] }
 sd-notify = "0.4"
 serde = { version = "1", features = ["derive"] }
 serde-constant = "0.1"

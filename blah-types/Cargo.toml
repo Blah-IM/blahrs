@@ -27,7 +27,7 @@ thiserror = "2"
 url = { version = "2", features = ["serde"] }
 
 [dependencies.rusqlite]
-version = "0.33"
+version = "0.34"
 optional = true
 
 [dependencies.schemars]

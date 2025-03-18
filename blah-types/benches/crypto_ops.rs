@@ -62,7 +62,7 @@ fn avg_msg() -> ChatPayload {
     // the last 1 year data from <https://t.me/nixos_zhcn>
     ChatPayload {
         rich_text: "🤔️ average length message! 平均长度消息".into(),
-        room: Id(1_234_567_890_000 << 16 | 0xDEAD),
+        room: Id((1_234_567_890_000 << 16) | 0xDEAD),
     }
 }
 
