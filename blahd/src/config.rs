@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use serde_constant::ConstBool;
 
-use crate::{database, ServerConfig};
+use crate::{ServerConfig, database};
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]

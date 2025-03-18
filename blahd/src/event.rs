@@ -1,5 +1,5 @@
-use std::collections::hash_map::Entry;
 use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 use std::convert::Infallible;
 use std::fmt;
 use std::pin::Pin;
@@ -7,22 +7,22 @@ use std::sync::Arc;
 use std::task::{Context, Poll};
 use std::time::Duration;
 
-use anyhow::{bail, Context as _, Result};
-use axum::extract::ws::{close_code, CloseFrame, Message, WebSocket};
+use anyhow::{Context as _, Result, bail};
 use axum::extract::WebSocketUpgrade;
+use axum::extract::ws::{CloseFrame, Message, WebSocket, close_code};
 use axum::response::Response;
+use blah_types::Signed;
 use blah_types::msg::{AuthPayload, SignedChatMsgWithId};
 use blah_types::server::{ClientEvent, ServerEvent};
-use blah_types::Signed;
 use futures_util::future::Either;
 use futures_util::stream::SplitSink;
-use futures_util::{stream_select, SinkExt as _, Stream, StreamExt};
+use futures_util::{SinkExt as _, Stream, StreamExt, stream_select};
 use parking_lot::Mutex;
-use serde::{de, Deserialize};
+use serde::{Deserialize, de};
 use serde_inline_default::serde_inline_default;
 use tokio::sync::broadcast;
-use tokio_stream::wrappers::errors::BroadcastStreamRecvError;
 use tokio_stream::wrappers::BroadcastStream;
+use tokio_stream::wrappers::errors::BroadcastStreamRecvError;
 
 use crate::database::TransactionOps;
 use crate::{AppState, ArcState};

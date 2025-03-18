@@ -3,10 +3,10 @@ use std::os::fd::{FromRawFd, OwnedFd};
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{Context, Result, anyhow, bail};
 use blahd::config::{Config, ListenConfig};
 use blahd::{AppState, Database};
-use tokio::signal::unix::{signal, SignalKind};
+use tokio::signal::unix::{SignalKind, signal};
 
 /// Blah Chat Server
 #[derive(Debug, clap::Parser)]
@@ -65,7 +65,7 @@ async fn main_serve(db: Database, config: Config) -> Result<()> {
                 .context("failed to listen on socket")?,
         ),
         ListenConfig::Systemd(_) => {
-            use rustix::net::{getsockname, SocketAddr};
+            use rustix::net::{SocketAddr, getsockname};
 
             let [fd] = sd_notify::listen_fds()
                 .context("failed to get fds from sd_listen_fds(3)")?

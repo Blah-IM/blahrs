@@ -26,9 +26,9 @@ use expect_test::expect;
 use futures_util::future::BoxFuture;
 use futures_util::{SinkExt, Stream, StreamExt, TryFutureExt};
 use parking_lot::Mutex;
-use reqwest::{header, Method, StatusCode};
+use reqwest::{Method, StatusCode, header};
 use rstest::{fixture, rstest};
-use rusqlite::{params, Connection};
+use rusqlite::{Connection, params};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -164,7 +164,7 @@ impl Server {
     async fn connect_ws(
         &self,
         auth_user: Option<&User>,
-    ) -> Result<impl Stream<Item = Result<ServerEvent>> + Unpin> {
+    ) -> Result<impl Stream<Item = Result<ServerEvent>> + Unpin + use<>> {
         let url = format!("ws://{}/_blah/ws", self.domain());
         let (mut ws, _) = tokio_tungstenite::connect_async(url).await.unwrap();
         if let Some(user) = auth_user {

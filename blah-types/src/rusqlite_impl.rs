@@ -1,4 +1,4 @@
-use ed25519_dalek::{VerifyingKey, PUBLIC_KEY_LENGTH};
+use ed25519_dalek::{PUBLIC_KEY_LENGTH, VerifyingKey};
 use rusqlite::types::{FromSql, FromSqlError, FromSqlResult, ToSqlOutput, ValueRef};
 use rusqlite::{Result, ToSql};
 

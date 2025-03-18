@@ -9,8 +9,8 @@ use blah_types::msg::{UserRegisterChallengeResponse, UserRegisterPayload};
 use blah_types::server::UserRegisterChallenge;
 use http_body_util::BodyExt;
 use parking_lot::Mutex;
-use rand::rngs::OsRng;
 use rand::RngCore;
+use rand::rngs::OsRng;
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 

@@ -2,10 +2,10 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
-use anyhow::{ensure, Context, Result};
+use anyhow::{Context, Result, ensure};
 use blah_types::identity::{IdUrl, UserActKeyDesc, UserIdentityDesc, UserProfile};
 use blah_types::msg::{RoomAttrs, ServerPermission};
-use blah_types::{bitflags, get_timestamp, PubKey, SignExt};
+use blah_types::{PubKey, SignExt, bitflags, get_timestamp};
 use clap::value_parser;
 use ed25519_dalek::pkcs8::spki::der::pem::LineEnding;
 use ed25519_dalek::pkcs8::{DecodePrivateKey, DecodePublicKey, EncodePrivateKey};
@@ -13,7 +13,7 @@ use ed25519_dalek::{SigningKey, VerifyingKey};
 use humantime::Duration;
 use rand::thread_rng;
 use reqwest::Url;
-use rusqlite::{named_params, prepare_and_bind, Connection};
+use rusqlite::{Connection, named_params, prepare_and_bind};
 use tokio::runtime::Runtime;
 
 const USER_AGENT: fn() -> String = || match option_env!("CFG_RELEASE") {

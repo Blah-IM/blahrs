@@ -12,8 +12,8 @@ pub fn timestamp_of_id(id: Id) -> u64 {
 }
 
 pub trait IdExt {
-    fn gen() -> Self;
-    fn gen_peer_chat_rid() -> Self;
+    fn gen_new() -> Self;
+    fn gen_new_peer_chat_rid() -> Self;
 
     fn is_peer_chat(&self) -> bool;
 }
@@ -23,7 +23,7 @@ thread_local! {
 }
 
 impl IdExt for Id {
-    fn gen() -> Self {
+    fn gen_new() -> Self {
         let timestamp = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
             .expect("after UNIX epoch");
@@ -46,8 +46,8 @@ impl IdExt for Id {
         })
     }
 
-    fn gen_peer_chat_rid() -> Self {
-        Id(Self::gen().0 | i64::MIN)
+    fn gen_new_peer_chat_rid() -> Self {
+        Id(Self::gen_new().0 | i64::MIN)
     }
 
     fn is_peer_chat(&self) -> bool {

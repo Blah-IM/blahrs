@@ -1,7 +1,7 @@
 use std::num::NonZero;
 use std::path::PathBuf;
 
-use anyhow::{ensure, Context};
+use anyhow::{Context, ensure};
 use blah_types::identity::UserIdentityDesc;
 use blah_types::msg::{
     ChatPayload, MemberPermission, RoomAttrs, ServerPermission, SignedChatMsg, SignedChatMsgWithId,
@@ -11,7 +11,7 @@ use blah_types::server::RoomMetadata;
 use blah_types::{Id, PubKey, Signee, UserKey};
 use parking_lot::Mutex;
 use rusqlite::types::FromSqlError;
-use rusqlite::{named_params, params, prepare_cached_and_bind, Connection, OpenFlags, Row};
+use rusqlite::{Connection, OpenFlags, Row, named_params, params, prepare_cached_and_bind};
 use serde::Deserialize;
 use serde_json::value::RawValue as JsonRawValue;
 

@@ -6,7 +6,7 @@ use std::time::Duration;
 use anyhow::Result;
 use axum::body::Bytes;
 use axum::extract::{Path, Query, State};
-use axum::http::{header, HeaderName, HeaderValue, StatusCode};
+use axum::http::{HeaderName, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, NoContent, Response};
 use axum::routing::MethodRouter;
 use axum::{Json, Router};
@@ -20,7 +20,7 @@ use blah_types::server::{
     ErrorResponseWithChallenge, RoomList, RoomMember, RoomMemberList, RoomMetadata, RoomMsgs,
     ServerCapabilities, ServerMetadata, UserIdentityDescResponse,
 };
-use blah_types::{get_timestamp, Id, PubKey, Signed, UserKey};
+use blah_types::{Id, PubKey, Signed, UserKey, get_timestamp};
 use data_encoding::BASE64_NOPAD;
 use database::{Transaction, TransactionOps};
 use id::IdExt;
@@ -326,7 +326,7 @@ async fn room_create_group(
             perm.contains(ServerPermission::CREATE_ROOM),
             ApiError::PermissionDenied("the user does not have permission to create room"),
         );
-        let rid = Id::gen();
+        let rid = Id::gen_new();
         conn.create_group(rid, &op.title, op.attrs)?;
         conn.add_room_member(rid, uid, MemberPermission::ALL)?;
         Ok(rid)
@@ -354,7 +354,7 @@ async fn room_create_peer_chat(
             .ok()
             .filter(|(_, perm)| perm.contains(ServerPermission::ACCEPT_PEER_CHAT))
             .ok_or(ApiError::PeerUserNotFound)?;
-        let rid = Id::gen_peer_chat_rid();
+        let rid = Id::gen_new_peer_chat_rid();
         txn.create_peer_room_with_members(rid, RoomAttrs::PEER_CHAT, src_uid, tgt_uid)?;
         Ok(rid)
     })?;
@@ -468,7 +468,7 @@ async fn post_room_msg(
             ApiError::PermissionDenied("the user does not have permission to post in the room"),
         );
 
-        let cid = Id::gen();
+        let cid = Id::gen_new();
         txn.add_room_chat_msg(rid, uid, cid, &chat)?;
         let members = txn
             .list_room_members(rid, Id::MIN, None)?

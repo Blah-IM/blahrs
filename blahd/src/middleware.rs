@@ -4,16 +4,16 @@ use std::fmt;
 use std::str::FromStr;
 use std::sync::Arc;
 
+use axum::Json;
 use axum::extract::rejection::{JsonRejection, PathRejection, QueryRejection};
 use axum::extract::{FromRef, FromRequest, FromRequestParts, Request};
-use axum::http::{header, request, HeaderValue, StatusCode};
+use axum::http::{HeaderValue, StatusCode, header, request};
 use axum::response::{IntoResponse, IntoResponseParts, Response, ResponseParts};
-use axum::Json;
 use blah_types::msg::AuthPayload;
 use blah_types::server::ErrorObject;
 use blah_types::{Signed, UserKey};
-use serde::de::DeserializeOwned;
 use serde::Serialize;
+use serde::de::DeserializeOwned;
 
 use crate::AppState;
 

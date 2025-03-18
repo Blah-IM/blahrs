@@ -4,8 +4,8 @@ use std::fmt;
 use std::str::FromStr;
 
 use ed25519_dalek::{
-    Signature, SignatureError, Signer, SigningKey, VerifyingKey, PUBLIC_KEY_LENGTH,
-    SIGNATURE_LENGTH,
+    PUBLIC_KEY_LENGTH, SIGNATURE_LENGTH, Signature, SignatureError, Signer, SigningKey,
+    VerifyingKey,
 };
 use rand::RngCore;
 use serde::{Deserialize, Serialize};

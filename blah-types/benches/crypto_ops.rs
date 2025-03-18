@@ -3,11 +3,11 @@ use std::hint::black_box;
 use std::time::Instant;
 
 use blah_types::msg::{ChatPayload, UserRegisterChallengeResponse, UserRegisterPayload};
-use blah_types::{get_timestamp, Id, PubKey, SignExt, Signee, UserKey};
-use criterion::{criterion_group, criterion_main, Criterion};
+use blah_types::{Id, PubKey, SignExt, Signee, UserKey, get_timestamp};
+use criterion::{Criterion, criterion_group, criterion_main};
 use ed25519_dalek::SigningKey;
-use rand::rngs::mock::StepRng;
 use rand::rngs::StdRng;
+use rand::rngs::mock::StepRng;
 use rand::{Rng, SeedableRng};
 use sha2::{Digest, Sha256};
 
@@ -24,7 +24,7 @@ fn bench_register_pow(c: &mut Criterion) {
         id_key: id_key.clone(),
         server_url: "http://some.example.com".parse().unwrap(),
         id_url: "http://another.example.com".parse().unwrap(),
-        challenge: Some(UserRegisterChallengeResponse::Pow { nonce: rng.gen() }),
+        challenge: Some(UserRegisterChallengeResponse::Pow { nonce: rng.r#gen() }),
     };
     let mut signee = Signee {
         nonce: 0,
@@ -35,7 +35,7 @@ fn bench_register_pow(c: &mut Criterion) {
 
     c.bench_function("register_pow_iter", |b| {
         b.iter_custom(|iters| {
-            signee.nonce = rng.gen();
+            signee.nonce = rng.r#gen();
 
             let inst = Instant::now();
             for _ in 0..iters {

@@ -3,19 +3,19 @@ use std::fmt;
 use std::num::NonZero;
 use std::time::Duration;
 
-use axum::extract::{OriginalUri, Path, Query};
-use axum::http::{header, StatusCode};
-use axum::response::{IntoResponse, Response};
 use axum::Json;
-use blah_types::msg::{RoomAttrs, SignedChatMsgWithId, WithMsgId};
+use axum::extract::{OriginalUri, Path, Query};
+use axum::http::{StatusCode, header};
+use axum::response::{IntoResponse, Response};
 use blah_types::Id;
+use blah_types::msg::{RoomAttrs, SignedChatMsgWithId, WithMsgId};
 use serde::{Deserialize, Serialize};
 use url::Url;
 
 use crate::database::TransactionOps;
 use crate::id::timestamp_of_id;
 use crate::middleware::ETag;
-use crate::{query_room_msgs, ApiError, ArcState, Pagination, HEADER_PUBLIC_NO_CACHE};
+use crate::{ApiError, ArcState, HEADER_PUBLIC_NO_CACHE, Pagination, query_room_msgs};
 
 const JSON_FEED_MIME: &str = "application/feed+json";
 const ATOM_FEED_MIME: &str = "application/atom+xml";

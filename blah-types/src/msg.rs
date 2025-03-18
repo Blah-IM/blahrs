@@ -3,7 +3,7 @@ use std::fmt;
 use std::num::ParseIntError;
 use std::str::FromStr;
 
-use serde::{de, ser, Deserialize, Serialize};
+use serde::{Deserialize, Serialize, de, ser};
 use url::Url;
 
 use crate::identity::IdUrl;
@@ -244,7 +244,7 @@ impl RichText {
         struct Fmt<'a>(&'a RichText);
         impl fmt::Display for Fmt<'_> {
             fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                for p in &self.0 .0 {
+                for p in &self.0.0 {
                     f.write_str(&p.text)?;
                 }
                 Ok(())
@@ -259,7 +259,7 @@ impl RichText {
         struct Fmt<'a>(&'a RichText);
         impl fmt::Display for Fmt<'_> {
             fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                for p in &self.0 .0 {
+                for p in &self.0.0 {
                     let tags = [
                         (p.attrs.bold, "<b>", "</b>"),
                         (p.attrs.code, "<code>", "</code>"),
@@ -490,9 +490,9 @@ impl_for_bitflags!(ServerPermission, MemberPermission, RoomAttrs);
 
 #[cfg(test)]
 mod tests {
-    use ed25519_dalek::{SigningKey, PUBLIC_KEY_LENGTH};
-    use expect_test::expect;
     use AddMemberPayload;
+    use ed25519_dalek::{PUBLIC_KEY_LENGTH, SigningKey};
+    use expect_test::expect;
 
     use crate::SignExt;
 

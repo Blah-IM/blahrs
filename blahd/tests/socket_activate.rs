@@ -8,12 +8,12 @@ use std::process::abort;
 use std::ptr::null;
 use std::time::Duration;
 
-use nix::fcntl::{fcntl, FcntlArg, FdFlag};
+use nix::fcntl::{FcntlArg, FdFlag, fcntl};
 use nix::libc::execve;
-use nix::sys::memfd::{memfd_create, MemFdCreateFlag};
-use nix::sys::signal::{kill, Signal};
-use nix::sys::wait::{waitpid, WaitStatus};
-use nix::unistd::{alarm, dup2, fork, getpid, ForkResult};
+use nix::sys::memfd::{MemFdCreateFlag, memfd_create};
+use nix::sys::signal::{Signal, kill};
+use nix::sys::wait::{WaitStatus, waitpid};
+use nix::unistd::{ForkResult, alarm, dup2, fork, getpid};
 use rstest::rstest;
 use tokio::io::stderr;
 

@@ -5,9 +5,9 @@ use std::fmt;
 use serde::{Deserialize, Serialize};
 use url::Url;
 
+use crate::PubKey;
 use crate::identity::UserIdentityDesc;
 use crate::msg::{Id, MemberPermission, RoomAttrs, SignedChatMsgWithId};
-use crate::PubKey;
 
 /// The response object returned as body on HTTP error status.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
