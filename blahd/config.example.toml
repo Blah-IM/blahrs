@@ -24,8 +24,6 @@ address = "localhost:8080"
 
 # Use systemd socket activation mechanism to get listener fd from envvars.
 # See also sd_listen_fds(3) and systemd.socket(5).
-# NB. Currently only TCP sockets are supported. UNIX domain socket support is
-# blocked by axum 0.5, see https://github.com/tokio-rs/axum/pull/2941
 #systemd = true
 
 [server]
