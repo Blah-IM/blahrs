@@ -24,7 +24,9 @@ fn bench_register_pow(c: &mut Criterion) {
         id_key: id_key.clone(),
         server_url: "http://some.example.com".parse().unwrap(),
         id_url: "http://another.example.com".parse().unwrap(),
-        challenge: Some(UserRegisterChallengeResponse::Pow { nonce: rng.r#gen() }),
+        challenge: Some(UserRegisterChallengeResponse::Pow {
+            nonce: rng.random(),
+        }),
     };
     let mut signee = Signee {
         nonce: 0,
@@ -35,7 +37,7 @@ fn bench_register_pow(c: &mut Criterion) {
 
     c.bench_function("register_pow_iter", |b| {
         b.iter_custom(|iters| {
-            signee.nonce = rng.r#gen();
+            signee.nonce = rng.random();
 
             let inst = Instant::now();
             for _ in 0..iters {
@@ -67,8 +69,9 @@ fn avg_msg() -> ChatPayload {
 }
 
 fn bench_msg_sign_verify(c: &mut Criterion) {
-    let rng = &mut StdRng::seed_from_u64(SEED);
+    use rand08::SeedableRng;
 
+    let rng = &mut rand08::rngs::StdRng::seed_from_u64(SEED);
     let id_key_priv = SigningKey::generate(rng);
     let act_key_priv = SigningKey::generate(rng);
     let id_key = PubKey::from(id_key_priv.verifying_key());
@@ -84,6 +87,7 @@ fn bench_msg_sign_verify(c: &mut Criterion) {
         })
     });
 
+    let rng = &mut StdRng::seed_from_u64(SEED);
     let signed = msg
         .sign_msg_with(&id_key, &act_key_priv, timestamp, rng)
         .unwrap();

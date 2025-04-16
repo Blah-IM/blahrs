@@ -9,8 +9,6 @@ use blah_types::msg::{UserRegisterChallengeResponse, UserRegisterPayload};
 use blah_types::server::UserRegisterChallenge;
 use http_body_util::BodyExt;
 use parking_lot::Mutex;
-use rand::RngCore;
-use rand::rngs::OsRng;
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 
@@ -109,7 +107,6 @@ struct Nonces {
 
 impl State {
     pub fn new(config: Config) -> Self {
-        // TODO: Audit this.
         let client = reqwest::ClientBuilder::new()
             .user_agent(SERVER_AND_VERSION)
             .redirect(reqwest::redirect::Policy::none())
@@ -121,8 +118,8 @@ impl State {
         } = config.challenge;
         Self {
             nonces: Nonces {
-                nonce: OsRng.next_u32(),
-                prev_nonce: OsRng.next_u32(),
+                nonce: rand::random(),
+                prev_nonce: rand::random(),
                 update_period: 0,
             }
             .into(),
@@ -143,10 +140,10 @@ impl State {
             n.prev_nonce = if n.update_period + 1 == cur_period {
                 n.nonce
             } else {
-                OsRng.next_u32()
+                rand::random()
             };
             n.update_period = cur_period;
-            n.nonce = OsRng.next_u32();
+            n.nonce = rand::random();
             [n.nonce, n.prev_nonce]
         }
     }

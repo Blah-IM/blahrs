@@ -11,7 +11,6 @@ use ed25519_dalek::pkcs8::spki::der::pem::LineEnding;
 use ed25519_dalek::pkcs8::{DecodePrivateKey, DecodePublicKey, EncodePrivateKey};
 use ed25519_dalek::{SigningKey, VerifyingKey};
 use humantime::Duration;
-use rand::thread_rng;
 use reqwest::Url;
 use rusqlite::{Connection, named_params, prepare_and_bind};
 use tokio::runtime::Runtime;
@@ -353,7 +352,7 @@ fn main_id(cmd: IdCommand) -> Result<()> {
             id_key_file,
             id_url,
         } => {
-            let id_key_priv = SigningKey::generate(&mut thread_rng());
+            let id_key_priv = SigningKey::generate(&mut rand08::rngs::OsRng);
             let id_key = PubKey::from(id_key_priv.verifying_key());
 
             let act_key_desc = UserActKeyDesc {

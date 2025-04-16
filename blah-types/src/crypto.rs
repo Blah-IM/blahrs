@@ -100,7 +100,7 @@ pub trait SignExt: Sized {
         id_key: &PubKey,
         act_key: &SigningKey,
     ) -> Result<Signed<Self>, SignatureError> {
-        self.sign_msg_with(id_key, act_key, get_timestamp(), &mut rand::thread_rng())
+        self.sign_msg_with(id_key, act_key, get_timestamp(), &mut rand::rng())
     }
 }
 
