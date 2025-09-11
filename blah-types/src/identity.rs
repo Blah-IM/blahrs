@@ -51,10 +51,10 @@ impl UserIdentityDesc {
 
     /// Validate signatures of the identity description at given time.
     pub fn verify(&self, id_url: Option<&IdUrl>, now_timestamp: u64) -> Result<(), VerifyError> {
-        if let Some(id_url) = id_url {
-            if !self.profile.signee.payload.id_urls.contains(id_url) {
-                return Err(VerifyErrorImpl::MissingIdUrl.into());
-            }
+        if let Some(id_url) = id_url
+            && !self.profile.signee.payload.id_urls.contains(id_url)
+        {
+            return Err(VerifyErrorImpl::MissingIdUrl.into());
         }
         if self.id_key != self.profile.signee.user.id_key {
             return Err(VerifyErrorImpl::ProfileIdKeyMismatch.into());

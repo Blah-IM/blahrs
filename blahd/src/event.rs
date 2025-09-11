@@ -63,10 +63,10 @@ impl State {
         let mut cnt = 0usize;
         let msg = Arc::new(ServerEvent::Msg(msg));
         for uid in &room_members {
-            if let Some(tx) = listeners.get(uid) {
-                if tx.send(msg.clone()).is_ok() {
-                    cnt += 1;
-                }
+            if let Some(tx) = listeners.get(uid)
+                && tx.send(msg.clone()).is_ok()
+            {
+                cnt += 1;
             }
         }
         if cnt != 0 {
@@ -119,10 +119,10 @@ impl Drop for UserEventReceiver {
     fn drop(&mut self) {
         tracing::debug!(%self.uid, "user disconnected");
         let mut map = self.st.event.user_listeners.lock();
-        if let Some(tx) = map.get_mut(&self.uid) {
-            if tx.receiver_count() == 1 {
-                map.remove(&self.uid);
-            }
+        if let Some(tx) = map.get_mut(&self.uid)
+            && tx.receiver_count() == 1
+        {
+            map.remove(&self.uid);
         }
     }
 }
