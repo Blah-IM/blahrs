@@ -23,19 +23,19 @@ parking_lot = "0.12" # Maybe no better performance, just that we hate poisoning.
 paste = "1.0.15"
 rand = "0.9"
 reqwest = "0.12"
-rusqlite = { version = "0.34", features = ["rusqlite-macros"] }
+rusqlite = { version = "0.37", features = ["rusqlite-macros"] }
 rustix = { version = "1", features = ["net"] }
 sd-notify = "0.4"
 serde = { version = "1", features = ["derive"] }
 serde-constant = "0.1"
-serde-inline-default = "0.2"
+serde-inline-default = "1"
 serde_jcs = "0.1"
 serde_json = { version = "1", features = ["raw_value"] }
 serde_urlencoded = "0.7"
 sha2 = "0.10"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal", "sync", "time"] }
 tokio-stream = { version = "0.1", features = ["sync"] }
-toml = "0.8"
+toml = "0.9"
 tower-http = { version = "0.6", features = ["cors", "limit", "set-header"] }
 tracing = "0.1"
 tracing-subscriber = "0.3"
@@ -44,7 +44,7 @@ url = { version = "2", features = ["serde"] }
 blah-types = { path = "../blah-types", features = ["rusqlite"] }
 
 [dependencies.mock_instant]
-version = "0.5"
+version = "0.6"
 optional = true
 
 [build-dependencies]
@@ -57,10 +57,10 @@ hyper-util = { version = "0.1", features = ["tokio"] }
 libc = "0.2"
 libtest-mimic = "0.8"
 reqwest = { version = "0.12", features = ["json"] }
-rstest = { version = "0.24", default-features = false }
+rstest = { version = "0.26", default-features = false }
 rustix = { version = "1", features = ["process"] }
 tempfile = "3"
-tokio-tungstenite = "0.26"
+tokio-tungstenite = "0.27"
 
 [[test]]
 name = "socket_activate"

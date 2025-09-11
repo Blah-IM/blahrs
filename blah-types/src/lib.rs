@@ -11,12 +11,12 @@ macro_rules! impl_json_schema_as {
     ($($tt:tt)*) => {};
 }
 
-// Workaround: https://github.com/GREsau/schemars/issues/267
+// TODO: https://github.com/GREsau/schemars/issues/267
 #[cfg(feature = "schemars")]
 macro_rules! impl_json_schema_as {
     ($ty:ty => $as_ty:ty) => {
         impl schemars::JsonSchema for $ty {
-            fn schema_name() -> String {
+            fn schema_name() -> std::borrow::Cow<'static, str> {
                 stringify!($ty).into()
             }
 
@@ -24,7 +24,7 @@ macro_rules! impl_json_schema_as {
                 concat!(module_path!(), "::", stringify!($ty)).into()
             }
 
-            fn json_schema(g: &mut schemars::r#gen::SchemaGenerator) -> schemars::schema::Schema {
+            fn json_schema(g: &mut schemars::SchemaGenerator) -> schemars::Schema {
                 g.subschema_for::<$as_ty>()
             }
         }

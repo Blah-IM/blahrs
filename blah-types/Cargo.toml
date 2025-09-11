@@ -27,20 +27,20 @@ thiserror = "2"
 url = { version = "2", features = ["serde"] }
 
 [dependencies.rusqlite]
-version = "0.34"
+version = "0.37"
 optional = true
 
 [dependencies.schemars]
-version = "0.8"
+version = "1"
 optional = true
-features = ["url"]
+features = ["url2"]
 
 [dependencies.mock_instant]
-version = "0.5"
+version = "0.6"
 optional = true
 
 [dev-dependencies]
-criterion = "0.5"
+criterion = "0.7"
 ed25519-dalek = { version = "2", features = ["rand_core"] }
 expect-test = "1"
 # WAIT: https://github.com/dalek-cryptography/curve25519-dalek/issues/731
