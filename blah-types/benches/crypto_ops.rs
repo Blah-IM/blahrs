@@ -10,6 +10,7 @@ use rand::{Rng, SeedableRng, rngs::SmallRng};
 use sha2::{Digest, Sha256};
 
 const SEED: u64 = 0xDEAD_BEEF_BEEF_DEAD;
+const FIXED_NONCE: u32 = 0x42;
 
 const MOCK_PRIV_KEY1: [u8; 32] = *b"this is the testing private key1";
 const MOCK_PRIV_KEY2: [u8; 32] = *b"that is the 2nd testing privkey.";
@@ -77,18 +78,14 @@ fn bench_msg_sign_verify(c: &mut Criterion) {
 
     let msg = avg_msg();
     c.bench_function("msg-sign", |b| {
-        // FIXME: Provide a deterministic signing method using a given nonce?
-        let fixed_nonce_rng = &mut SmallRng::seed_from_u64(SEED);
         b.iter(|| {
             black_box(msg.clone())
-                .sign_msg_with(&id_key, &act_key_priv, timestamp, fixed_nonce_rng)
+                .sign_msg_with(&id_key, &act_key_priv, timestamp, FIXED_NONCE)
                 .unwrap()
         })
     });
-
-    let rng = &mut SmallRng::seed_from_u64(SEED);
     let signed = msg
-        .sign_msg_with(&id_key, &act_key_priv, timestamp, rng)
+        .sign_msg_with(&id_key, &act_key_priv, timestamp, FIXED_NONCE)
         .unwrap();
 
     c.bench_function("msg-verify", |b| {

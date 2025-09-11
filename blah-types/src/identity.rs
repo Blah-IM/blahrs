@@ -274,9 +274,10 @@ mod tests {
 
     #[test]
     fn id_desc_verify() {
+        // Insecure but deterministic mock values.
         const TIMESTAMP: u64 = 42;
+        const NONCE: u32 = 42;
 
-        let rng = &mut rand::rngs::mock::StepRng::new(42, 1);
         let id_url = "https://example.com".parse::<IdUrl>().unwrap();
         let id_priv = SigningKey::from_bytes(&[42; 32]);
         let id_key = PubKey::from(id_priv.verifying_key());
@@ -287,7 +288,7 @@ mod tests {
                 preferred_chat_server_urls: Vec::new(),
                 id_urls: vec![id_url],
             }
-            .sign_msg_with(&id_key, &id_priv, TIMESTAMP, rng)
+            .sign_msg_with(&id_key, &id_priv, TIMESTAMP, NONCE)
             .unwrap(),
         };
 
@@ -319,7 +320,7 @@ mod tests {
                 expire_time: TIMESTAMP + 1,
                 comment: String::new(),
             }
-            .sign_msg_with(&id_key, &id_priv, TIMESTAMP, rng)
+            .sign_msg_with(&id_key, &id_priv, TIMESTAMP, NONCE)
             .unwrap(),
         );
         id_desc.verify(None, TIMESTAMP).unwrap();
@@ -339,7 +340,7 @@ mod tests {
                 comment: String::new(),
             }
             // Self-signed.
-            .sign_msg_with(&id_key, &act_priv, TIMESTAMP, rng)
+            .sign_msg_with(&id_key, &act_priv, TIMESTAMP, NONCE)
             .unwrap(),
         );
         assert_err!(
@@ -353,7 +354,7 @@ mod tests {
             comment: String::new(),
         }
         // Wrong id_key.
-        .sign_msg_with(&act_pub, &act_priv, TIMESTAMP, rng)
+        .sign_msg_with(&act_pub, &act_priv, TIMESTAMP, NONCE)
         .unwrap();
         assert_err!(
             id_desc.verify(None, TIMESTAMP),
@@ -366,7 +367,7 @@ mod tests {
             expire_time: u64::MAX,
             comment: String::new(),
         }
-        .sign_msg_with(&id_key, &id_priv, TIMESTAMP, rng)
+        .sign_msg_with(&id_key, &id_priv, TIMESTAMP, NONCE)
         .unwrap();
         assert_err!(
             id_desc.verify(None, TIMESTAMP),
@@ -379,7 +380,7 @@ mod tests {
             expire_time: TIMESTAMP + 1,
             comment: String::new(),
         }
-        .sign_msg_with(&id_key, &id_priv, TIMESTAMP, rng)
+        .sign_msg_with(&id_key, &id_priv, TIMESTAMP, NONCE)
         .unwrap();
         id_desc.verify(None, TIMESTAMP).unwrap();
 

@@ -87,20 +87,23 @@ pub struct Signee<T> {
 }
 
 pub trait SignExt: Sized {
+    /// A convenient shortcut method of [`Signed::new`] for method chaining.
     fn sign_msg_with(
         self,
         id_key: &PubKey,
         act_key: &SigningKey,
         timestamp: u64,
-        rng: &mut (impl RngCore + ?Sized),
+        nonce: u32,
     ) -> Result<Signed<Self>, SignatureError>;
 
+    /// A convenient shortcut method of [`SignExt::sign_msg`] using the current
+    /// timestamp and a random nonce from [`rand::rng`].
     fn sign_msg(
         self,
         id_key: &PubKey,
         act_key: &SigningKey,
     ) -> Result<Signed<Self>, SignatureError> {
-        self.sign_msg_with(id_key, act_key, get_timestamp(), &mut rand::rng())
+        self.sign_msg_with(id_key, act_key, get_timestamp(), rand::rng().next_u32())
     }
 }
 
@@ -110,9 +113,9 @@ impl<T: Serialize> SignExt for T {
         id_key: &PubKey,
         act_key: &SigningKey,
         timestamp: u64,
-        rng: &mut (impl RngCore + ?Sized),
+        nonce: u32,
     ) -> Result<Signed<Self>, SignatureError> {
-        Signed::new(id_key, act_key, timestamp, rng, self)
+        Signed::new(id_key, act_key, timestamp, nonce, self)
     }
 }
 
@@ -138,15 +141,19 @@ impl<T: Serialize> Signed<T> {
     /// Sign the payload with the given `key`.
     ///
     /// This operation only fail when serialization of `payload` fails.
+    ///
+    /// This function is pure and portable, if the serialization of `payload` is
+    /// pure and portable. That is, it always returns the bit-identical bytes if
+    /// it returns `Ok` as long as the arguments are bit-identical.
     pub fn new(
         id_key: &PubKey,
         act_key: &SigningKey,
         timestamp: u64,
-        rng: &mut (impl RngCore + ?Sized),
+        nonce: u32,
         payload: T,
     ) -> Result<Self, SignatureError> {
         let signee = Signee {
-            nonce: rng.next_u32(),
+            nonce,
             payload,
             timestamp,
             user: UserKey {

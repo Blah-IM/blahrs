@@ -500,7 +500,8 @@ mod tests {
 
     #[test]
     fn canonical_msg() {
-        let mut fake_rng = rand::rngs::mock::StepRng::new(0x42, 1);
+        const NONCE: u32 = 0x42;
+
         let id_key = SigningKey::from_bytes(&[0x42; 32]);
         let act_key = SigningKey::from_bytes(&[0x43; 32]);
         let timestamp = 0xDEAD_BEEF;
@@ -508,12 +509,7 @@ mod tests {
             rich_text: RichText::from("hello"),
             room: Id(42),
         }
-        .sign_msg_with(
-            &id_key.verifying_key().into(),
-            &act_key,
-            timestamp,
-            &mut fake_rng,
-        )
+        .sign_msg_with(&id_key.verifying_key().into(), &act_key, timestamp, NONCE)
         .unwrap();
 
         let json = serde_jcs::to_string(&msg).unwrap();
