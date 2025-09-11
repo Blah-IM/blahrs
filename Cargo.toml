@@ -9,7 +9,7 @@ default-members = ["blahd"]
 
 [workspace.package]
 edition = "2024"
-# NB: Sync MSRV with CI!
+# NB: Sync MSRV with CI and rust-toolchain.toml!
 rust-version = "1.88" # let_chains
 
 [workspace.lints.clippy]

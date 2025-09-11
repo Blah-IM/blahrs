@@ -47,7 +47,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # NB: Sync MSRV with Cargo.toml!
+        # NB: Sync MSRV with Cargo.toml and rust-toolchain.toml!
         rust: [stable, beta, "1.88"]
     name: Test ${{ matrix.rust }}
     # Need libsqlite3-dev >= 3.38.0 (2022-02-22)
