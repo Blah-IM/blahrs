@@ -7,6 +7,11 @@ members = [
 ]
 default-members = ["blahd"]
 
+[workspace.package]
+edition = "2024"
+# NB: Sync MSRV with CI!
+rust-version = "1.88" # let_chains
+
 [workspace.lints.clippy]
 allow_attributes_without_reason = "warn"
 dbg_macro = "warn"
