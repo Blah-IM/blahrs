@@ -21,11 +21,9 @@ let
   mkConfigFile =
     name: config:
     (toml.generate name config).overrideAttrs (old: {
-      buildCommand =
-        old.buildCommand
-        + ''
-          ${lib.getBin cfg.package}/bin/blahd validate --config $out
-        '';
+      buildCommand = old.buildCommand + ''
+        ${lib.getBin cfg.package}/bin/blahd validate --config $out
+      '';
     });
 
   settingsType = types.submodule {
