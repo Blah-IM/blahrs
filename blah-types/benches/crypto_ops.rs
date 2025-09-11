@@ -6,26 +6,27 @@ use blah_types::msg::{ChatPayload, UserRegisterChallengeResponse, UserRegisterPa
 use blah_types::{Id, PubKey, SignExt, Signee, UserKey, get_timestamp};
 use criterion::{Criterion, criterion_group, criterion_main};
 use ed25519_dalek::SigningKey;
-use rand::rngs::StdRng;
-use rand::rngs::mock::StepRng;
-use rand::{Rng, SeedableRng};
+use rand::{Rng, SeedableRng, rngs::SmallRng};
 use sha2::{Digest, Sha256};
 
 const SEED: u64 = 0xDEAD_BEEF_BEEF_DEAD;
 
-fn bench_register_pow(c: &mut Criterion) {
-    let rng = &mut StdRng::seed_from_u64(SEED);
+const MOCK_PRIV_KEY1: [u8; 32] = *b"this is the testing private key1";
+const MOCK_PRIV_KEY2: [u8; 32] = *b"that is the 2nd testing privkey.";
 
-    let id_key_priv = SigningKey::from_bytes(&[0x1A; 32]);
+fn bench_register_pow(c: &mut Criterion) {
+    let nonce_rng = &mut SmallRng::seed_from_u64(SEED);
+
+    let id_key_priv = SigningKey::from_bytes(&MOCK_PRIV_KEY1);
     let id_key = PubKey::from(id_key_priv.verifying_key());
-    let act_key_priv = SigningKey::from_bytes(&[0x2B; 32]);
+    let act_key_priv = SigningKey::from_bytes(&MOCK_PRIV_KEY2);
     let act_key = PubKey::from(act_key_priv.verifying_key());
     let payload = UserRegisterPayload {
         id_key: id_key.clone(),
         server_url: "http://some.example.com".parse().unwrap(),
         id_url: "http://another.example.com".parse().unwrap(),
         challenge: Some(UserRegisterChallengeResponse::Pow {
-            nonce: rng.random(),
+            nonce: nonce_rng.random(),
         }),
     };
     let mut signee = Signee {
@@ -37,7 +38,7 @@ fn bench_register_pow(c: &mut Criterion) {
 
     c.bench_function("register_pow_iter", |b| {
         b.iter_custom(|iters| {
-            signee.nonce = rng.random();
+            signee.nonce = nonce_rng.random();
 
             let inst = Instant::now();
             for _ in 0..iters {
@@ -69,25 +70,23 @@ fn avg_msg() -> ChatPayload {
 }
 
 fn bench_msg_sign_verify(c: &mut Criterion) {
-    use rand08::SeedableRng;
-
-    let rng = &mut rand08::rngs::StdRng::seed_from_u64(SEED);
-    let id_key_priv = SigningKey::generate(rng);
-    let act_key_priv = SigningKey::generate(rng);
+    let id_key_priv = SigningKey::from_bytes(&MOCK_PRIV_KEY1);
+    let act_key_priv = SigningKey::from_bytes(&MOCK_PRIV_KEY2);
     let id_key = PubKey::from(id_key_priv.verifying_key());
     let timestamp = 1_727_045_943 << 16; // The time when I writing this code.
 
     let msg = avg_msg();
     c.bench_function("msg-sign", |b| {
-        let seq_rng = &mut StepRng::new(1, 1);
+        // FIXME: Provide a deterministic signing method using a given nonce?
+        let fixed_nonce_rng = &mut SmallRng::seed_from_u64(SEED);
         b.iter(|| {
             black_box(msg.clone())
-                .sign_msg_with(&id_key, &act_key_priv, timestamp, seq_rng)
+                .sign_msg_with(&id_key, &act_key_priv, timestamp, fixed_nonce_rng)
                 .unwrap()
         })
     });
 
-    let rng = &mut StdRng::seed_from_u64(SEED);
+    let rng = &mut SmallRng::seed_from_u64(SEED);
     let signed = msg
         .sign_msg_with(&id_key, &act_key_priv, timestamp, rng)
         .unwrap();

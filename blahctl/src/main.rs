@@ -9,8 +9,9 @@ use blah_types::{PubKey, SignExt, bitflags, get_timestamp};
 use clap::value_parser;
 use ed25519_dalek::pkcs8::spki::der::pem::LineEnding;
 use ed25519_dalek::pkcs8::{DecodePrivateKey, DecodePublicKey, EncodePrivateKey};
-use ed25519_dalek::{SigningKey, VerifyingKey};
+use ed25519_dalek::{SECRET_KEY_LENGTH, SigningKey, VerifyingKey};
 use humantime::Duration;
+use rand::TryRngCore;
 use reqwest::Url;
 use rusqlite::{Connection, named_params, prepare_and_bind};
 use tokio::runtime::Runtime;
@@ -352,7 +353,16 @@ fn main_id(cmd: IdCommand) -> Result<()> {
             id_key_file,
             id_url,
         } => {
-            let id_key_priv = SigningKey::generate(&mut rand08::rngs::OsRng);
+            // TODO: Should be `SigningKey::generate` but blocked on
+            // ed25519_dalek 3.0
+            // See: <https://github.com/dalek-cryptography/curve25519-dalek/pull/777>
+            let id_key_priv = {
+                let mut secret = [0u8; SECRET_KEY_LENGTH];
+                rand::rngs::OsRng
+                    .try_fill_bytes(&mut secret)
+                    .expect("failed to get random");
+                SigningKey::from_bytes(&secret)
+            };
             let id_key = PubKey::from(id_key_priv.verifying_key());
 
             let act_key_desc = UserActKeyDesc {
